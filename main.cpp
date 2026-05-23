@@ -9,13 +9,18 @@ using namespace std;
 // Enumeração que representa todos os tipos de tokens
 // reconhecidos pelo analisador léxico.
 enum class TokenType {
-
     // Palavras reservadas
+    // Tipos
+    T_VAR,
     T_INT,
+    T_FLOAT,
+    T_BOOL,
+    T_STRING,
+
+    // Condicionais e loops
     T_IF,
     T_ELSE,
-    T_WHILE,
-    T_PRINT,
+    T_FOR,
 
     // Identificadores e números
     T_ID,
@@ -85,10 +90,17 @@ public:
 
         // Cadastro das palavras reservadas da linguagem
         keywords["int"] = TokenType::T_INT;
+        keywords["float"] = TokenType::T_FLOAT;
+        keywords["bool"] = TokenType::T_BOOL;
+        keywords["string"] = TokenType::T_STRING;
+
         keywords["if"] = TokenType::T_IF;
         keywords["else"] = TokenType::T_ELSE;
+        keywords["for"] = TokenType::T_FOR;
+
         keywords["while"] = TokenType::T_WHILE;
         keywords["print"] = TokenType::T_PRINT;
+
     }
 
     // Retorna o caractere atual sem avançar na leitura.
