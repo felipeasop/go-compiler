@@ -1,12 +1,12 @@
-# Scanner Léxico — Go-like
+# Scanner Léxico de Go
 
 Analisador léxico escrito em C++ para uma linguagem inspirada em Go. Lê um código-fonte e transforma o texto em uma sequência de tokens identificados.
 
 ## Como compilar e rodar
 
 ```bash
-g++ -o scanner scanner.cpp
-./scanner
+g++ -o main main.cpp
+./main
 ```
 
 ## Tokens reconhecidos
