@@ -25,9 +25,12 @@ enum class TokenType {
     // Identificadores e números
     T_ID,
     T_NUM,
+    T_FLOAT_NUM,
+    T_STRING_CONTENT,
 
     // Operadores de atribuição e comparação
     T_ASSIGN,
+    T_DECLARE_ASSIGN,
     T_EQ,
 
     // Operadores aritméticos
@@ -49,6 +52,7 @@ enum class TokenType {
 
     // Delimitador de instrução
     T_SEMICOLON,
+    T_COLON,
 
     // Fim do arquivo/entrada
     T_EOF
@@ -93,14 +97,9 @@ public:
         keywords["float"] = TokenType::T_FLOAT;
         keywords["bool"] = TokenType::T_BOOL;
         keywords["string"] = TokenType::T_STRING;
-
         keywords["if"] = TokenType::T_IF;
         keywords["else"] = TokenType::T_ELSE;
         keywords["for"] = TokenType::T_FOR;
-
-        keywords["while"] = TokenType::T_WHILE;
-        keywords["print"] = TokenType::T_PRINT;
-
     }
 
     // Retorna o caractere atual sem avançar na leitura.
@@ -139,7 +138,7 @@ public:
     }
 
     // Ignora comentários de uma linha iniciados por "//".
-    // Continua lendo até o final da linha ou fim da entrada.
+    // Continua lendo até o final da linha ou fim da entrada.PAREN
     void skipComment() {
 
         while (peek() != '\n' && peek() != '\0') {
@@ -154,12 +153,24 @@ public:
 
         // Coloca o primeiro dígito no buffer
         buffer += start;
+        bool isFloat = false;
 
         // Continua enquanto encontrar outros dígitos
-        while (isdigit(peek())) {
+        while (isdigit(peek()) || peek() == '.') {
+            // Se encontrar um ponto, marca que é um float
+            if (peek() == '.'){
+                // Se já tiver um ponto, é um float inválido
+                if(isFloat){
+                    throw runtime_error("Erro lexico: float invalido: " + buffer + " na linha: " + to_string(line));
+                }
+                isFloat = true;
+            }
             buffer += next();
         }
-
+        // Retorna um token float
+        if (isFloat) {
+            return Token(TokenType::T_FLOAT_NUM, buffer, line);
+        }
         // Retorna um token numérico
         return Token(TokenType::T_NUM, buffer, line);
     }
@@ -185,6 +196,18 @@ public:
 
         // Caso contrário, trata como identificador comum
         return Token(TokenType::T_ID, buffer, line);
+    }
+
+    //Implementando suporte a strings e comentários multilinha
+    Token scanString(char start) {
+        string buffer;
+        buffer += start;
+        while (peek() != '"') {
+            buffer += next();
+        }
+        buffer += next();
+
+        return Token(TokenType::T_STRING, buffer, line);
     }
 
     // Método principal do scanner:
@@ -232,8 +255,16 @@ public:
                 skipComment();    // ignora o restante da linha
                 return nextToken(); // busca o próximo token válido
             }
+            if (peek() == '*') {
+                next();           // consome o '*'
+                skipComment();    // ignora o restante da linha
+                return nextToken(); // busca o próximo token válido
+            }
 
             return Token(TokenType::T_DIV, "/", line);
+
+
+
 
         case '=':
 
@@ -267,6 +298,16 @@ public:
         case ';':
             return Token(TokenType::T_SEMICOLON, ";", line);
 
+        case ':':
+            return Token(TokenType:: T_COLON, ":", line);
+
+            if (peek() == '=') {
+                next();
+                return Token(TokenType::T_DECLARE_ASSIGN, ":=", line);
+            }
+
+
+
         default:
 
             // Se encontrar um caractere que não pertence à linguagem,
@@ -287,71 +328,49 @@ string tokenTypeToString(TokenType type) {
 
     switch(type) {
 
-    case TokenType::T_INT:
-        return "T_INT";
+    case TokenType::T_INT: return "T_INT";
 
-    case TokenType::T_IF:
-        return "T_IF";
+    case TokenType::T_IF: return "T_IF";
 
-    case TokenType::T_ELSE:
-        return "T_ELSE";
+    case TokenType::T_ELSE: return "T_ELSE";
 
-    case TokenType::T_WHILE:
-        return "T_WHILE";
+    case TokenType::T_ID: return "T_ID";
 
-    case TokenType::T_PRINT:
-        return "T_PRINT";
+    case TokenType::T_NUM: return "T_NUM";
 
-    case TokenType::T_ID:
-        return "T_ID";
+    case TokenType::T_FLOAT: return "T_FLOAT";
 
-    case TokenType::T_NUM:
-        return "T_NUM";
+    case TokenType::T_FLOAT_NUM: return "T_FLOAT_NUM";
 
-    case TokenType::T_ASSIGN:
-        return "T_ASSIGN";
+    case TokenType::T_ASSIGN: return "T_ASSIGN";
 
-    case TokenType::T_EQ:
-        return "T_EQ";
+    case TokenType::T_EQ: return "T_EQ";
 
-    case TokenType::T_PLUS:
-        return "T_PLUS";
+    case TokenType::T_PLUS: return "T_PLUS";
 
-    case TokenType::T_MINUS:
-        return "T_MINUS";
+    case TokenType::T_MINUS: return "T_MINUS";
 
-    case TokenType::T_MULT:
-        return "T_MULT";
+    case TokenType::T_MULT: return "T_MULT";
 
-    case TokenType::T_DIV:
-        return "T_DIV";
+    case TokenType::T_DIV: return "T_DIV";
 
-    case TokenType::T_LT:
-        return "T_LT";
+    case TokenType::T_LT: return "T_LT";
 
-    case TokenType::T_GT:
-        return "T_GT";
+    case TokenType::T_GT: return "T_GT";
 
-    case TokenType::T_LPAREN:
-        return "T_LPAREN";
+    case TokenType::T_LPAREN: return "T_LPAREN";
 
-    case TokenType::T_RPAREN:
-        return "T_RPAREN";
+    case TokenType::T_RPAREN: return "T_RPAREN";
 
-    case TokenType::T_LBRACE:
-        return "T_LBRACE";
+    case TokenType::T_LBRACE: return "T_LBRACE";
 
-    case TokenType::T_RBRACE:
-        return "T_RBRACE";
+    case TokenType::T_RBRACE: return "T_RBRACE";
 
-    case TokenType::T_SEMICOLON:
-        return "T_SEMICOLON";
+    case TokenType::T_SEMICOLON: return "T_SEMICOLON";
 
-    case TokenType::T_EOF:
-        return "T_EOF";
+    case TokenType::T_EOF: return "T_EOF";
 
-    default:
-        return "UNKNOWN";
+    default: return "UNKNOWN";
     }
 }
 
@@ -366,6 +385,9 @@ int soma = 10 + 20;
 if (soma == 30) {
 print(soma);
 }
+float floatnumero = 3.14;
+
+String str = "babau";
 
 // comentario ignorado
 
