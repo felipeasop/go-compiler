@@ -1,52 +1,45 @@
-# Scanner Léxico de Go
+# Analisador Léxico (Go-Lexer)
 
-Analisador léxico escrito em C++ para uma linguagem inspirada em Go. Lê um código-fonte e transforma o texto em uma sequência de tokens identificados.
+Um analisador léxico eficiente escrito em C++ para uma linguagem inspirada na sintaxe de Go. Este projeto transforma código-fonte bruto em uma sequência de tokens estruturados, facilitando as etapas subsequentes de um compilador.
 
-## Como compilar e rodar
+## Funcionalidades
+* **Reconhecimento de Tokens**: Identifica palavras reservadas, tipos primitivos, operadores aritméticos/relacionais e símbolos de agrupamento.
+* **Tratamento de Comentários**: Suporte a comentários de linha (`//`) e de bloco (`/* ... */`).
+* **Suporte a Literais**: Suporta inteiros, números de ponto flutuante (`float`) e strings com suporte a sequências de escape (`\n`, `\t`, etc.).
+* **Relatório de Erros**: Mensagens detalhadas de erro léxico com indicação da linha.
+* **Saída Formatada**: Exibe os tokens encontrados em uma tabela organizada no terminal.
+
+## Como Compilar e Rodar
+
+Certifique-se de estar na pasta raiz do projeto. Você pode compilar todos os arquivos `.cpp` de uma vez:
 
 ```bash
-g++ -o main main.cpp
+# Compilação
+g++ *.cpp -o main
+
+# Execução
 ./main
 ```
 
-## Tokens reconhecidos
+## Como Testar
 
-| Categoria | Tokens |
-|---|---|
-| Estrutura | `package`, `import`, `func`, `main` |
-| Tipos | `var`, `int`, `float`, `bool`, `string` |
-| Controle | `if`, `else`, `for` |
-| Operadores | `+` `-` `*` `/` `=` `:=` `==` `<` `>` |
-| Delimitadores | `(` `)` `{` `}` `;` `:` |
-| Literais | números inteiros, floats, strings com `"` |
-| Comentários | `//` linha e `/* bloco */` |
-
-## Trocando o teste
-
-No final do `main()`, descomente o teste que quiser rodar:
-
+O arquivo `Main.cpp` contém três conjuntos de testes pré-configurados. Para alternar entre eles, edite o final da função `main()` em `Main.cpp`:
 ```cpp
-string code = code_teste1;   // tipos, aritmética, if/else
-// string code = code_teste2; // strings, for, comentários
-// string code = code_teste3; // underscores, aninhamento, todos os operadores
+// Descomente apenas um por vez:
+std::string code = code_teste1;
+// std::string code = code_teste2;
+// std::string code = code_teste3;
 ```
 
-## Saída esperada
+## Saída Esperada
 
-```
-T_PACKAGE -> package (linha 2)
-T_MAIN -> main (linha 2)
-T_FUNC -> func (linha 6)
-T_VAR -> var (linha 7)
-T_ID -> x (linha 7)
-T_INT -> int (linha 7)
-...
-Fim da analise lexica.
-```
+O Analisador imprime os resultados em uma tabela:
 
-## Erros léxicos tratados
-
-- Caractere inválido → `Erro Lexico: caractere invalido 'X' na linha N`
-- String não fechada → `Erro lexico: string nao fechada na linha N`
-- Float inválido (ex: `1.2.3`) → `Erro lexico: float invalido`
-- Comentário de bloco não fechado → `Erro lexico: comentario de bloco nao fechado na linha N`
+| Token Type | Lexema | Linha |
+| T_PACKAGE |	package |	1 |
+| T_ID |	main |	1 |
+T_IMPORT | import |3
+T_STRING_LITERAL | "fmt" | 3 |
+T_FUNC | func | 5 |
+T_ID | main | 5 |
+| ... |	... |	... |
