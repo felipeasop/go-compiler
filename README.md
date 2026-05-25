@@ -37,9 +37,9 @@ O Analisador imprime os resultados em uma tabela:
 
 | Token Type | Lexema | Linha |
 | T_PACKAGE |	package |	1 |
-| T_ID |	main |	1 |
-T_IMPORT | import |3
-T_STRING_LITERAL | "fmt" | 3 |
-T_FUNC | func | 5 |
-T_ID | main | 5 |
+| T_ID |	main | 1 |
+| T_IMPORT | import | 3
+| T_STRING_LITERAL | "fmt" | 3 |
+| T_FUNC | func | 5 |
+| T_ID | main | 5 |
 | ... |	... |	... |
