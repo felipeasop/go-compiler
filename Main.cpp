@@ -1,18 +1,17 @@
 #include <iostream>
 #include <string>
-#include <stdexcept>
 #include <iomanip>
 
-#include "Utils.hpp"
-#include "Scanner.hpp"
+#include "./lexer/Utils.hpp"
+#include "./lexer/Scanner.hpp"
 
 int main() {
 
     // ----------------------------------------------------------------
     // TESTE 1: tipos primitivos, aritmetica, comparacao e if/else
     // ----------------------------------------------------------------
-    std::string code_teste1 = R"(
-package main
+    std::string code_teste1 =
+R"(package main
 
 import "fmt"
 
@@ -47,8 +46,8 @@ func main() {
     // ----------------------------------------------------------------
     // TESTE 2: strings, :=, for e comentarios de linha e bloco
     // ----------------------------------------------------------------
-    std::string code_teste2 = R"(
-package main
+    std::string code_teste2 =
+R"(package main
 
 import "fmt"
 
@@ -87,8 +86,8 @@ func main() {
     // ----------------------------------------------------------------
     // TESTE 3: underscores, aninhamento, todos os operadores
     // ----------------------------------------------------------------
-    std::string code_teste3 = R"(
-package main
+    std::string code_teste3 =
+R"(package main
 
 import "fmt"
 
