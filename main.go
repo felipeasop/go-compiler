@@ -157,3 +157,58 @@ func repeat(ch rune, n int) string {
 	}
 	return string(buf)
 }
+
+/*
+func main() {
+	// Código-fonte escrito na linguagem MicroC.
+	code := `
+        int soma = 10 + 20;
+
+        if (soma == 30) {
+            print(soma);
+        }
+
+        while (soma > 0) {
+            soma = soma - 1;
+        }
+    `
+
+	// ── FASE 1: ANÁLISE LÉXICA ────────────────────────────────────────
+	fmt.Println("=== FASE 1: INICIANDO ANALISE LEXICA (SCANNER) ===")
+
+	s := scanner.New(code)
+	tokens, err := s.Tokenize()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Erro durante a fase de Scanner: %v\n", err)
+		os.Exit(1)
+	}
+
+	for _, tok := range tokens {
+		if tok.Type != scanner.T_EOF {
+			fmt.Printf("%s -> \"%s\" (linha %d)\n", tok.Type, tok.Lexeme, tok.Line)
+		}
+	}
+	fmt.Println("Analise lexica realizada com sucesso!\n")
+
+	// ── FASE 2: ANÁLISE SINTÁTICA ─────────────────────────────────────
+	fmt.Println("=== FASE 2: INICIANDO ANALISE SINTATICA (PARSER) ===")
+
+	parser := NewParser(tokens)
+	programAST, err := parser.ParseProgram()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "FALHA NA COMPILACAO!")
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Sucesso! A sequencia de tokens forma um programa estruturalmente valido para o MicroC.\n")
+
+	// ── FASE 3: IMPRESSÃO DA AST ──────────────────────────────────────
+	fmt.Println("=== FASE 3: EXIBICAO DA ARVORE SINTATICA ABSTRATA (AST) ===")
+	programAST.Print(0)
+	fmt.Println("==========================================================")
+
+	// Nota: não há delete em Go — o GC desaloca a árvore automaticamente.
+	fmt.Println("\nMemoria da AST sera desalocada automaticamente pelo Garbage Collector.")
+}
+*/
