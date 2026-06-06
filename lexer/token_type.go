@@ -51,6 +51,8 @@ const (
 	// Operadores relacionais
 	T_LT
 	T_GT
+	T_LE
+	T_GE
 
 	// Símbolos de agrupamento
 	T_LPAREN
@@ -71,6 +73,7 @@ const (
 // Isso facilita a exibição dos tokens no terminal.
 // Em Go, implementar String() satisfaz a interface fmt.Stringer,
 // substituindo a função tokenTypeToString() do Utils.cpp/hpp.
+// Isso facilita a exibição dos tokens no terminal.
 func (t TokenType) String() string {
 	switch t {
 	case T_PACKAGE:
@@ -125,6 +128,10 @@ func (t TokenType) String() string {
 		return "T_LT"
 	case T_GT:
 		return "T_GT"
+	case T_LE:
+		return "T_LE"
+	case T_GE:
+		return "T_GE"
 	case T_LPAREN:
 		return "T_LPAREN"
 	case T_RPAREN:
