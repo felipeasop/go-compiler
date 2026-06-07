@@ -1,77 +1,226 @@
 {
   "tipo": "ProgramNode",
-  "statements": [
+  "package": "testdata",
+  "imports": ["\"fmt\""],
+  "globals": [
+  ],
+  "functions": [
     {
-      "tipo": "VarDeclNode",
-      "nome": "x",
-      "inicializador":
-        {"tipo": "NumberNode", "valor": 10}
-    },
-    {
-      "tipo": "PrintCallNode",
-      "expr":
-        {"tipo": "VariableNode", "nome": "x"}
-    },
-    {
-      "tipo": "VarDeclNode",
-      "nome": "y",
-      "inicializador":
-        {"tipo": "NumberNode", "valor": 10}
-    },
-    {
-      "tipo": "IfNode",
-      "condicao":
+      "tipo": "FuncNode",
+      "nome": "relationalOps",
+      "corpo": [
         {
-          "tipo": "BinaryOpNode",
-          "op": "T_GT",
-          "esq":
-            {"tipo": "VariableNode", "nome": "y"},
-          "dir":
-            {"tipo": "NumberNode", "valor": 5}
+          "tipo": "VarDeclNode",
+          "nome": "a",
+          "inicializador":
+            {"tipo": "LiteralNode", "valor": "5"}
         },
-      "then": [
         {
-          "tipo": "PrintCallNode",
-          "expr":
-            {"tipo": "VariableNode", "nome": "y"}
+          "tipo": "VarDeclNode",
+          "nome": "b",
+          "inicializador":
+            {"tipo": "LiteralNode", "valor": "10"}
+        },
+        {
+          "tipo": "IfNode",
+          "condicao":
+            {
+              "tipo": "BinaryOpNode",
+              "op": "==",
+              "esq":
+                {"tipo": "VariableNode", "nome": "a"},
+              "dir":
+                {"tipo": "VariableNode", "nome": "b"}
+            },
+          "then": [
+            {
+              "tipo": "PrintCallNode",
+              "expr":
+                {"tipo": "VariableNode", "nome": "a"}
+            }
+          ]
+        },
+        {
+          "tipo": "IfNode",
+          "condicao":
+            {
+              "tipo": "BinaryOpNode",
+              "op": "!=",
+              "esq":
+                {"tipo": "VariableNode", "nome": "a"},
+              "dir":
+                {"tipo": "VariableNode", "nome": "b"}
+            },
+          "then": [
+            {
+              "tipo": "PrintCallNode",
+              "expr":
+                {"tipo": "VariableNode", "nome": "b"}
+            }
+          ]
+        },
+        {
+          "tipo": "IfNode",
+          "condicao":
+            {
+              "tipo": "BinaryOpNode",
+              "op": "<",
+              "esq":
+                {"tipo": "VariableNode", "nome": "a"},
+              "dir":
+                {"tipo": "VariableNode", "nome": "b"}
+            },
+          "then": [
+            {
+              "tipo": "PrintCallNode",
+              "expr":
+                {"tipo": "VariableNode", "nome": "a"}
+            }
+          ]
+        },
+        {
+          "tipo": "IfNode",
+          "condicao":
+            {
+              "tipo": "BinaryOpNode",
+              "op": "<=",
+              "esq":
+                {"tipo": "VariableNode", "nome": "a"},
+              "dir":
+                {"tipo": "VariableNode", "nome": "b"}
+            },
+          "then": [
+            {
+              "tipo": "PrintCallNode",
+              "expr":
+                {"tipo": "VariableNode", "nome": "a"}
+            }
+          ]
+        },
+        {
+          "tipo": "IfNode",
+          "condicao":
+            {
+              "tipo": "BinaryOpNode",
+              "op": ">",
+              "esq":
+                {"tipo": "VariableNode", "nome": "b"},
+              "dir":
+                {"tipo": "VariableNode", "nome": "a"}
+            },
+          "then": [
+            {
+              "tipo": "PrintCallNode",
+              "expr":
+                {"tipo": "VariableNode", "nome": "b"}
+            }
+          ]
+        },
+        {
+          "tipo": "IfNode",
+          "condicao":
+            {
+              "tipo": "BinaryOpNode",
+              "op": ">=",
+              "esq":
+                {"tipo": "VariableNode", "nome": "b"},
+              "dir":
+                {"tipo": "VariableNode", "nome": "a"}
+            },
+          "then": [
+            {
+              "tipo": "PrintCallNode",
+              "expr":
+                {"tipo": "VariableNode", "nome": "b"}
+            }
+          ]
         }
       ]
     },
     {
-      "tipo": "VarDeclNode",
-      "nome": "z",
-      "inicializador":
-        {"tipo": "NumberNode", "valor": 5}
-    },
-    {
-      "tipo": "ForNode",
-      "condicao":
-        {
-          "tipo": "BinaryOpNode",
-          "op": "T_GT",
-          "esq":
-            {"tipo": "VariableNode", "nome": "z"},
-          "dir":
-            {"tipo": "NumberNode", "valor": 0}
-        },
+      "tipo": "FuncNode",
+      "nome": "operatorPrecedence",
       "corpo": [
+        {
+          "tipo": "VarDeclNode",
+          "nome": "a",
+          "inicializador":
+            {
+              "tipo": "BinaryOpNode",
+              "op": "+",
+              "esq":
+                {"tipo": "LiteralNode", "valor": "2"},
+              "dir":
+                {
+                  "tipo": "BinaryOpNode",
+                  "op": "*",
+                  "esq":
+                    {"tipo": "LiteralNode", "valor": "3"},
+                  "dir":
+                    {"tipo": "LiteralNode", "valor": "4"}
+                }
+            }
+        },
+        {
+          "tipo": "VarDeclNode",
+          "nome": "b",
+          "inicializador":
+            {
+              "tipo": "BinaryOpNode",
+              "op": "*",
+              "esq":
+                {
+                  "tipo": "BinaryOpNode",
+                  "op": "+",
+                  "esq":
+                    {"tipo": "LiteralNode", "valor": "2"},
+                  "dir":
+                    {"tipo": "LiteralNode", "valor": "3"}
+                },
+              "dir":
+                {"tipo": "LiteralNode", "valor": "4"}
+            }
+        },
         {
           "tipo": "PrintCallNode",
           "expr":
-            {"tipo": "VariableNode", "nome": "z"}
+            {"tipo": "VariableNode", "nome": "a"}
         },
         {
-          "tipo": "AssignNode",
-          "nome": "z",
+          "tipo": "PrintCallNode",
           "expr":
+            {"tipo": "VariableNode", "nome": "b"}
+        }
+      ]
+    },
+    {
+      "tipo": "FuncNode",
+      "nome": "leftAssociativity",
+      "corpo": [
+        {
+          "tipo": "VarDeclNode",
+          "nome": "x",
+          "inicializador":
             {
               "tipo": "BinaryOpNode",
-              "op": "T_MINUS",
+              "op": "-",
               "esq":
-                {"tipo": "VariableNode", "nome": "z"},
+                {
+                  "tipo": "BinaryOpNode",
+                  "op": "-",
+                  "esq":
+                    {"tipo": "LiteralNode", "valor": "10"},
+                  "dir":
+                    {"tipo": "LiteralNode", "valor": "3"}
+                },
               "dir":
-                {"tipo": "NumberNode", "valor": 1}
+                {"tipo": "LiteralNode", "valor": "2"}
             }
+        },
+        {
+          "tipo": "PrintCallNode",
+          "expr":
+            {"tipo": "VariableNode", "nome": "x"}
         }
       ]
     }
