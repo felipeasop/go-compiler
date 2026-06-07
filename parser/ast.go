@@ -3,15 +3,10 @@ package parser
 import (
 	"fmt"
 	"strings"
-
-	"go-compiler/lexer"
 )
 
 // =====================================================================
 // AST — ÁRVORE SINTÁTICA ABSTRATA
-// =====================================================================
-// Em Go usamos interfaces no lugar de classes abstratas do C++.
-// Qualquer tipo que implemente Print() e ToJSON() é um ASTNode.
 // =====================================================================
 
 type ASTNode interface {
@@ -23,23 +18,77 @@ func pad(n int) string { return strings.Repeat(" ", n) }
 func jpd(n int) string { return strings.Repeat("  ", n) }
 
 // ─── ProgramNode ───────────────────────────────────────────────────
-// Raiz da árvore. Corresponde a: Program → Statement*
 type ProgramNode struct {
-	Statements []ASTNode
+	PackageName string
+	Imports     []string
+	Functions   []ASTNode
+	Globals     []ASTNode
 }
 
 func (n *ProgramNode) Print(indent int) {
-	fmt.Printf("%sProgramNode\n", pad(indent))
-	for _, s := range n.Statements {
+	fmt.Printf("%sProgramNode (package %s)\n", pad(indent), n.PackageName)
+	for _, imp := range n.Imports {
+		fmt.Printf("%sImport: %s\n", pad(indent+2), imp)
+	}
+	for _, g := range n.Globals {
+		g.Print(indent + 2)
+	}
+	for _, f := range n.Functions {
+		f.Print(indent + 2)
+	}
+}
+
+func (n *ProgramNode) ToJSON(indent int) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%s{\n%s\"tipo\": \"ProgramNode\",\n%s\"package\": %q,\n", jpd(indent), jpd(indent+1), jpd(indent+1), n.PackageName))
+	sb.WriteString(fmt.Sprintf("%s\"imports\": [", jpd(indent+1)))
+	for i, imp := range n.Imports {
+		sb.WriteString(fmt.Sprintf("%q", imp))
+		if i < len(n.Imports)-1 {
+			sb.WriteString(", ")
+		}
+	}
+	sb.WriteString("],\n")
+	sb.WriteString(fmt.Sprintf("%s\"globals\": [\n", jpd(indent+1)))
+	for i, g := range n.Globals {
+		sb.WriteString(g.ToJSON(indent + 2))
+		if i < len(n.Globals)-1 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(fmt.Sprintf("%s],\n", jpd(indent+1)))
+	sb.WriteString(fmt.Sprintf("%s\"functions\": [\n", jpd(indent+1)))
+	for i, f := range n.Functions {
+		sb.WriteString(f.ToJSON(indent + 2))
+		if i < len(n.Functions)-1 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(fmt.Sprintf("%s]\n%s}", jpd(indent+1), jpd(indent)))
+	return sb.String()
+}
+
+// ─── FuncNode ──────────────────────────────────────────────────────
+type FuncNode struct {
+	Name string
+	Body []ASTNode
+}
+
+func (n *FuncNode) Print(indent int) {
+	fmt.Printf("%sFuncNode (func %s)\n", pad(indent), n.Name)
+	for _, s := range n.Body {
 		s.Print(indent + 2)
 	}
 }
-func (n *ProgramNode) ToJSON(indent int) string {
+
+func (n *FuncNode) ToJSON(indent int) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s{\n%s\"tipo\": \"ProgramNode\",\n%s\"statements\": [\n", jpd(indent), jpd(indent+1), jpd(indent+1)))
-	for i, s := range n.Statements {
+	sb.WriteString(fmt.Sprintf("%s{\n%s\"tipo\": \"FuncNode\",\n%s\"nome\": %q,\n%s\"corpo\": [\n", jpd(indent), jpd(indent+1), jpd(indent+1), n.Name, jpd(indent+1)))
+	for i, s := range n.Body {
 		sb.WriteString(s.ToJSON(indent + 2))
-		if i < len(n.Statements)-1 {
+		if i < len(n.Body)-1 {
 			sb.WriteString(",")
 		}
 		sb.WriteString("\n")
@@ -49,33 +98,29 @@ func (n *ProgramNode) ToJSON(indent int) string {
 }
 
 // ─── VarDeclNode ───────────────────────────────────────────────────
-// int x = expr;   ou   int x;
-// Corresponde a: Declaration → "int" ID [ "=" Expr ] ";"
 type VarDeclNode struct {
 	Name        string
-	Initializer ASTNode // nil se não houver inicialização
+	Initializer ASTNode
 }
 
 func (n *VarDeclNode) Print(indent int) {
-	fmt.Printf("%sVarDeclNode (int %s)\n", pad(indent), n.Name)
+	fmt.Printf("%sVarDeclNode (%s)\n", pad(indent), n.Name)
 	if n.Initializer != nil {
 		n.Initializer.Print(indent + 4)
 	}
 }
+
 func (n *VarDeclNode) ToJSON(indent int) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%s{\n%s\"tipo\": \"VarDeclNode\",\n%s\"nome\": %q", jpd(indent), jpd(indent+1), jpd(indent+1), n.Name))
 	if n.Initializer != nil {
-		sb.WriteString(fmt.Sprintf(",\n%s\"inicializador\":\n", jpd(indent+1)))
-		sb.WriteString(n.Initializer.ToJSON(indent + 2))
+		sb.WriteString(fmt.Sprintf(",\n%s\"inicializador\":\n%s", jpd(indent+1), n.Initializer.ToJSON(indent+2)))
 	}
 	sb.WriteString(fmt.Sprintf("\n%s}", jpd(indent)))
 	return sb.String()
 }
 
 // ─── AssignNode ────────────────────────────────────────────────────
-// x = expr;
-// Corresponde a: Assignment → ID "=" Expr ";"
 type AssignNode struct {
 	Name string
 	Expr ASTNode
@@ -85,6 +130,7 @@ func (n *AssignNode) Print(indent int) {
 	fmt.Printf("%sAssignNode (%s)\n", pad(indent), n.Name)
 	n.Expr.Print(indent + 4)
 }
+
 func (n *AssignNode) ToJSON(indent int) string {
 	return fmt.Sprintf("%s{\n%s\"tipo\": \"AssignNode\",\n%s\"nome\": %q,\n%s\"expr\":\n%s\n%s}",
 		jpd(indent), jpd(indent+1), jpd(indent+1), n.Name, jpd(indent+1), n.Expr.ToJSON(indent+2), jpd(indent))
@@ -92,10 +138,6 @@ func (n *AssignNode) ToJSON(indent int) string {
 
 // ─── PrintCallNode ─────────────────────────────────────────────────
 // fmt.Println(expr)
-// Em Go a chamada de impressão é fmt.Println — o scanner emite
-// "fmt" como T_ID, "." não é um token, então parseamos como
-// chamada de função genérica reconhecida pelo nome "fmt.Println".
-// Corresponde a: PrintStmt → "fmt" "." "Println" "(" Expr ")" ";"
 type PrintCallNode struct {
 	Expr ASTNode
 }
@@ -104,24 +146,19 @@ func (n *PrintCallNode) Print(indent int) {
 	fmt.Printf("%sPrintCallNode (fmt.Println)\n", pad(indent))
 	n.Expr.Print(indent + 4)
 }
+
 func (n *PrintCallNode) ToJSON(indent int) string {
 	return fmt.Sprintf("%s{\n%s\"tipo\": \"PrintCallNode\",\n%s\"expr\":\n%s\n%s}",
 		jpd(indent), jpd(indent+1), jpd(indent+1), n.Expr.ToJSON(indent+2), jpd(indent))
 }
 
 // ─── IfNode ────────────────────────────────────────────────────────
-// if (cond) { ... } else { ... }
-// Melhoria: suporte a else if em cadeia.
-type ElseIfBlock struct {
-	Condition ASTNode
-	Body      []ASTNode
-}
-
+// else if é representado colocando um IfNode dentro de ElseBranch.
 type IfNode struct {
-	Condition    ASTNode
-	ThenBranch   []ASTNode
-	ElseIfBlocks []ElseIfBlock
-	ElseBranch   []ASTNode
+	Init       ASTNode
+	Condition  ASTNode
+	ThenBranch []ASTNode
+	ElseBranch []ASTNode
 }
 
 func (n *IfNode) Print(indent int) {
@@ -132,13 +169,6 @@ func (n *IfNode) Print(indent int) {
 	for _, s := range n.ThenBranch {
 		s.Print(indent + 4)
 	}
-	for _, eib := range n.ElseIfBlocks {
-		fmt.Printf("%sElseIf:\n", pad(indent+2))
-		eib.Condition.Print(indent + 4)
-		for _, s := range eib.Body {
-			s.Print(indent + 4)
-		}
-	}
 	if len(n.ElseBranch) > 0 {
 		fmt.Printf("%sElse:\n", pad(indent+2))
 		for _, s := range n.ElseBranch {
@@ -146,6 +176,7 @@ func (n *IfNode) Print(indent int) {
 		}
 	}
 }
+
 func (n *IfNode) ToJSON(indent int) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%s{\n%s\"tipo\": \"IfNode\",\n%s\"condicao\":\n%s,\n%s\"then\": [\n",
@@ -174,9 +205,6 @@ func (n *IfNode) ToJSON(indent int) string {
 }
 
 // ─── ForNode ───────────────────────────────────────────────────────
-// Go usa "for" onde C/Java usam "while".
-// Forma: for (cond) { ... }   →  for cond { ... }
-// Corresponde a: ForStmt → "for" "(" Expr ")" "{" Statement* "}"
 type ForNode struct {
 	Condition ASTNode
 	Body      []ASTNode
@@ -185,16 +213,26 @@ type ForNode struct {
 func (n *ForNode) Print(indent int) {
 	fmt.Printf("%sForNode\n", pad(indent))
 	fmt.Printf("%sCondicao:\n", pad(indent+2))
-	n.Condition.Print(indent + 4)
+	if n.Condition != nil {
+		n.Condition.Print(indent + 4)
+	} else {
+		fmt.Printf("%s(loop infinito)\n", pad(indent+4))
+	}
 	fmt.Printf("%sCorpo:\n", pad(indent+2))
 	for _, s := range n.Body {
 		s.Print(indent + 4)
 	}
 }
+
 func (n *ForNode) ToJSON(indent int) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s{\n%s\"tipo\": \"ForNode\",\n%s\"condicao\":\n%s,\n%s\"corpo\": [\n",
-		jpd(indent), jpd(indent+1), jpd(indent+1), n.Condition.ToJSON(indent+2), jpd(indent+1)))
+	sb.WriteString(fmt.Sprintf("%s{\n%s\"tipo\": \"ForNode\",\n", jpd(indent), jpd(indent+1)))
+	if n.Condition != nil {
+		sb.WriteString(fmt.Sprintf("%s\"condicao\":\n%s,\n", jpd(indent+1), n.Condition.ToJSON(indent+2)))
+	} else {
+		sb.WriteString(fmt.Sprintf("%s\"condicao\": null,\n", jpd(indent+1)))
+	}
+	sb.WriteString(fmt.Sprintf("%s\"corpo\": [\n", jpd(indent+1)))
 	for i, s := range n.Body {
 		sb.WriteString(s.ToJSON(indent + 2))
 		if i < len(n.Body)-1 {
@@ -206,61 +244,103 @@ func (n *ForNode) ToJSON(indent int) string {
 	return sb.String()
 }
 
+// ─── ReturnNode ────────────────────────────────────────────────────
+// return [expr]
+type ReturnNode struct {
+	Value ASTNode // nil para return sem valor
+}
+
+func (n *ReturnNode) Print(indent int) {
+	fmt.Printf("%sReturnNode\n", pad(indent))
+	if n.Value != nil {
+		n.Value.Print(indent + 4)
+	}
+}
+
+func (n *ReturnNode) ToJSON(indent int) string {
+	if n.Value == nil {
+		return fmt.Sprintf("%s{\"tipo\": \"ReturnNode\", \"valor\": null}", jpd(indent))
+	}
+	return fmt.Sprintf("%s{\n%s\"tipo\": \"ReturnNode\",\n%s\"valor\":\n%s\n%s}",
+		jpd(indent), jpd(indent+1), jpd(indent+1), n.Value.ToJSON(indent+2), jpd(indent))
+}
+
+// ─── BreakNode ─────────────────────────────────────────────────────
+type BreakNode struct{}
+
+func (n *BreakNode) Print(indent int) {
+	fmt.Printf("%sBreakNode\n", pad(indent))
+}
+func (n *BreakNode) ToJSON(indent int) string {
+	return fmt.Sprintf("%s{\"tipo\": \"BreakNode\"}", jpd(indent))
+}
+
+// ─── ContinueNode ──────────────────────────────────────────────────
+type ContinueNode struct{}
+
+func (n *ContinueNode) Print(indent int) {
+	fmt.Printf("%sContinueNode\n", pad(indent))
+}
+func (n *ContinueNode) ToJSON(indent int) string {
+	return fmt.Sprintf("%s{\"tipo\": \"ContinueNode\"}", jpd(indent))
+}
+
 // ─── BinaryOpNode ──────────────────────────────────────────────────
-// Qualquer operação binária: +, -, *, /, ==, <, >, <=, >=
 type BinaryOpNode struct {
-	Op    lexer.TokenType
+	OpStr string
 	Left  ASTNode
 	Right ASTNode
 }
 
 func (n *BinaryOpNode) Print(indent int) {
-	fmt.Printf("%sBinaryOpNode (%s)\n", pad(indent), n.Op)
+	fmt.Printf("%sBinaryOpNode (%s)\n", pad(indent), n.OpStr)
 	n.Left.Print(indent + 4)
 	n.Right.Print(indent + 4)
 }
+
 func (n *BinaryOpNode) ToJSON(indent int) string {
 	return fmt.Sprintf("%s{\n%s\"tipo\": \"BinaryOpNode\",\n%s\"op\": %q,\n%s\"esq\":\n%s,\n%s\"dir\":\n%s\n%s}",
-		jpd(indent), jpd(indent+1), jpd(indent+1), n.Op.String(),
+		jpd(indent), jpd(indent+1), jpd(indent+1), n.OpStr,
 		jpd(indent+1), n.Left.ToJSON(indent+2),
 		jpd(indent+1), n.Right.ToJSON(indent+2),
 		jpd(indent))
 }
 
-// ─── NumberNode ────────────────────────────────────────────────────
-type NumberNode struct{ Value int }
-
-func (n *NumberNode) Print(indent int) {
-	fmt.Printf("%sNumberNode (%d)\n", pad(indent), n.Value)
-}
-func (n *NumberNode) ToJSON(indent int) string {
-	return fmt.Sprintf("%s{\"tipo\": \"NumberNode\", \"valor\": %d}", jpd(indent), n.Value)
+// ─── UnaryOpNode ───────────────────────────────────────────────────
+// Cobre: !expr, -expr
+type UnaryOpNode struct {
+	OpStr   string
+	Operand ASTNode
 }
 
-// ─── FloatNode ─────────────────────────────────────────────────────
-// Melhoria: suporte a float
-type FloatNode struct{ Value float64 }
-
-func (n *FloatNode) Print(indent int) {
-	fmt.Printf("%sFloatNode (%g)\n", pad(indent), n.Value)
-}
-func (n *FloatNode) ToJSON(indent int) string {
-	return fmt.Sprintf("%s{\"tipo\": \"FloatNode\", \"valor\": %g}", jpd(indent), n.Value)
+func (n *UnaryOpNode) Print(indent int) {
+	fmt.Printf("%sUnaryOpNode (%s)\n", pad(indent), n.OpStr)
+	n.Operand.Print(indent + 4)
 }
 
-// ─── StringNode ────────────────────────────────────────────────────
-// Melhoria: suporte a string literal
-type StringNode struct{ Value string }
-
-func (n *StringNode) Print(indent int) {
-	fmt.Printf("%sStringNode (%s)\n", pad(indent), n.Value)
+func (n *UnaryOpNode) ToJSON(indent int) string {
+	return fmt.Sprintf("%s{\n%s\"tipo\": \"UnaryOpNode\",\n%s\"op\": %q,\n%s\"operando\":\n%s\n%s}",
+		jpd(indent), jpd(indent+1), jpd(indent+1), n.OpStr,
+		jpd(indent+1), n.Operand.ToJSON(indent+2), jpd(indent))
 }
-func (n *StringNode) ToJSON(indent int) string {
-	return fmt.Sprintf("%s{\"tipo\": \"StringNode\", \"valor\": %q}", jpd(indent), n.Value)
+
+// ─── LiteralNode ───────────────────────────────────────────────────
+// Cobre INT, FLOAT, STRING, IMAG, CHAR, true, false
+type LiteralNode struct {
+	Value string
+}
+
+func (n *LiteralNode) Print(indent int) {
+	fmt.Printf("%sLiteralNode (%s)\n", pad(indent), n.Value)
+}
+func (n *LiteralNode) ToJSON(indent int) string {
+	return fmt.Sprintf("%s{\"tipo\": \"LiteralNode\", \"valor\": %q}", jpd(indent), n.Value)
 }
 
 // ─── VariableNode ──────────────────────────────────────────────────
-type VariableNode struct{ Name string }
+type VariableNode struct {
+	Name string
+}
 
 func (n *VariableNode) Print(indent int) {
 	fmt.Printf("%sVariableNode (%s)\n", pad(indent), n.Name)
