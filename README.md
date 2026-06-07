@@ -1,46 +1,36 @@
-# Analisador Léxico (Go-Lexer)
+# Go Compiler
 
-Um analisador léxico eficiente escrito em C++ para uma linguagem inspirada na sintaxe de Go. Este projeto transforma código-fonte bruto em uma sequência de tokens estruturados, facilitando as etapas subsequentes de um compilador.
+Um compilador para a linguagem Go e implementado em Go, criado para estudo e aprendizado. Este projeto inclui um analisador léxico e um analisador sintático.
 
-## Funcionalidades
+## 1. Analisador Léxico (Lexer)
+
+O analisador léxico transforma código-fonte bruto em uma sequência de tokens estruturados, facilitando as etapas subsequentes de um compilador.
+
 * **Reconhecimento de Tokens**: Identifica palavras reservadas, tipos primitivos, operadores aritméticos/relacionais e símbolos de agrupamento.
 * **Tratamento de Comentários**: Suporte a comentários de linha (`//`) e de bloco (`/* ... */`).
 * **Suporte a Literais**: Suporta inteiros, números de ponto flutuante (`float`) e strings com suporte a sequências de escape (`\n`, `\t`, etc.).
+* **Pontuação**: Suporte a sintaxe sem ponto e vírgula, com inferência automática de delimitadores, assim como o Go.
 * **Relatório de Erros**: Mensagens detalhadas de erro léxico com indicação da linha.
 * **Saída Formatada**: Exibe os tokens encontrados em uma tabela organizada no terminal.
 
-## Como Compilar e Rodar
+## 2. Analisador Sintático (Parser)
 
-Certifique-se de estar na pasta raiz do projeto. Você pode compilar todos os arquivos `.cpp` de uma vez:
+O analisador sintático transforma a sequência de tokens gerada pelo analisador léxico em uma árvore sintática, utilizando um parser descendente recursivo que valida a gramática do código.
 
-```bash
-# Compilação
-g++ *.cpp -o main
-
-# Execução
-./main
-```
+* **Construção de Árvore Sintática**: Constrói uma árvore sintática a partir dos tokens reconhecidos.
+* **Precedência Matemática e Lógica Baseada em 6 Camadas**: Resolve expressões respeitando a ordem de operadores
+* **Tratamento de Escopo e Short Statements**: Capaz de parsear estruturas complexas e exclusivas do Go, como inicializações de variáveis embutidas diretamente nos laços repetitivos e condicionais 
+* **Recuperação de Erros (Panic Mode)**: Implementa sincronização através de barreiras para evitar travamentos, reportando múltiplos erros sintáticos e a linha da ocorrência sem interromper a execução do Parser.
 
 ## Como Testar
 
-O arquivo `Main.cpp` contém três conjuntos de testes pré-configurados. Para alternar entre eles, edite o final da função `main()` em `Main.cpp`:
-```cpp
-// Descomente apenas um por vez:
-std::string code = code_teste1;
-// std::string code = code_teste2;
-// std::string code = code_teste3;
+Para testar o compilador, execute o seguinte comando:
+```sh
+go run . tests/nome_do_arquivo.go
 ```
 
-## Saída Esperada
+É possível utilizar o compilador Go padrão para comparação.
 
-O Analisador imprime os resultados em uma tabela:
-
-| Token Type | Lexema | Linha |
-| :--- | :--- | :--- |
-| T_PACKAGE |	package |	1 |
-| T_ID |	main | 1 |
-| T_IMPORT | import | 3 |
-| T_STRING_LITERAL | "fmt" | 3 |
-| T_FUNC | func | 5 |
-| T_ID | main | 5 |
-| ... |	... |	... |
+```sh
+go build tests/<nome_do_arquivo>.go
+```
