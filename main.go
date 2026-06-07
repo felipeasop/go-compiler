@@ -11,95 +11,55 @@ import (
 )
 
 func main() {
-	// Código de teste (Instruções válidas para a gramática do nosso Parser)
-	code :=
-		`var x int = 10;
-    fmt.Println(x);
-
-    var y int = 10;
-    if y > 5 {
-        fmt.Println(y);
-    }
-
-    var z int = 5;
-    for z > 0 {
-        fmt.Println(z);
-        z = z - 1;
-    }`
-
-	// Criar a pasta 'outputs' se ela não existir
-	outputDir := "outputs"
-	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-		os.Mkdir(outputDir, 0755)
-	}
-
-	// ==========================================
-	// ANÁLISE LÉXICA
-	// ==========================================
-	fmt.Println("=== INICIANDO ANÁLISE LÉXICA ===")
-
-	scanner := lexer.NewScanner(code)
-
-	tokens, err := scanner.Tokenize()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Erro léxico fatal: %v\n", err)
+	if len(os.Args) < 2 {
+		fmt.Println("Uso correto: go run . <caminho_do_arquivo>")
 		os.Exit(1)
 	}
 
-	// Imprime a Tabela de Tokens
-	fmt.Printf("%-20s%-20s%-10s\n", "TIPO DE TOKEN", "LEXEMA", "LINHA")
-	fmt.Println(strings.Repeat("-", 50))
-	for _, token := range tokens {
-		fmt.Printf("%-20s%-20s%-10d\n", token.Type.String(), token.Lexeme, token.Line)
-	}
-	fmt.Println(strings.Repeat("-", 50))
+	filePath := os.Args[1]
 
-	// Exportação JSON dos Tokens para a pasta outputs/
-	tokensJSON, err := json.MarshalIndent(tokens, "", "  ")
-	if err == nil {
-		err = os.WriteFile(outputDir+"/tokens.json", tokensJSON, 0644)
-		if err == nil {
-			fmt.Println("Arquivo 'outputs/tokens.json' gerado com sucesso!")
-		} else {
-			fmt.Printf("Erro ao salvar tokens.json: %v\n", err)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Erro ao ler o arquivo %s: %v\n", filePath, err)
+		os.Exit(1)
+	}
+
+	os.MkdirAll("outputs", 0755)
+
+	fmt.Printf("=== INICIANDO ANÁLISE LÉXICA DO ARQUIVO: %s ===\n", filePath)
+	scanner := lexer.NewScanner(string(data))
+	tokens, err := scanner.Tokenize()
+	if err != nil {
+		fmt.Printf("Erro lexico fatal: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("%-20s %-20s %s\n", "TIPO DE TOKEN", "LEXEMA", "LINHA")
+	fmt.Println(strings.Repeat("-", 50))
+	for _, tok := range tokens {
+		if tok.Type != lexer.EOF {
+			fmt.Printf("%-20s %-20s %d\n", tok.Type.String(), tok.Lexeme, tok.Line)
 		}
 	}
 
-	// ==========================================
-	// ANÁLISE SINTÁTICA (PARSER)
-	// ==========================================
-	fmt.Println("\n=== INICIANDO ANÁLISE SINTÁTICA ===")
+	tokJSON, _ := json.MarshalIndent(tokens, "", "  ")
+	os.WriteFile("outputs/tokens.json", tokJSON, 0644)
 
+	fmt.Println("\n=== INICIANDO ANÁLISE SINTÁTICA ===")
 	p := parser.NewParser(tokens)
 	ast := p.ParseProgram()
 
-	// Verifica se houveram erros sintáticos
-	erros := p.Errors()
-	if len(erros) > 0 {
-		fmt.Println("Erros sintáticos encontrados:")
-		for _, erro := range erros {
-			fmt.Println("  -", erro)
+	if len(p.Errors()) > 0 {
+		fmt.Println("Erros sintáticos:")
+		for _, e := range p.Errors() {
+			fmt.Printf("  - %v\n", e)
 		}
 	} else {
-		fmt.Println("Análise sintática concluída sem erros.")
+		fmt.Println("Análise sintática concluída sem erros!")
+		fmt.Println("\n=== AST ===")
+		ast.Print(0)
 
-		fmt.Println("\n=== FASE 3: EXIBICAO DA ARVORE SINTATICA ABSTRATA (AST) ===")
-		if ast != nil {
-			ast.Print(0) // Chama o print bonitão que acabamos de montar
-		}
-		fmt.Println(strings.Repeat("=", 58))
-	}
-
-	// Exportação JSON da AST para a pasta outputs/
-	if ast != nil {
 		astJSON := ast.ToJSON(0)
-		err = os.WriteFile(outputDir+"/ast.json", []byte(astJSON), 0644)
-		if err == nil {
-			fmt.Println("Arquivo 'outputs/ast.json' gerado com sucesso!")
-		} else {
-			fmt.Printf("Erro ao salvar ast.json: %v\n", err)
-		}
-	} else {
-		fmt.Println("Erro: AST não foi gerada devido a erros sintáticos críticos.")
+		os.WriteFile("outputs/ast.json", []byte(astJSON), 0644)
 	}
 }
