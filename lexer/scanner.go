@@ -5,52 +5,33 @@ import (
 	"unicode"
 )
 
-// Mapa de palavras reservadas:
-// associa texto (ex.: "if") ao tipo do token correspondente.
-var keywords = map[string]TokenType{
-	// Cadastro das palavras reservadas da linguagem
-	"package": T_PACKAGE,
-	"import":  T_IMPORT,
-	"func":    T_FUNC,
-	"var":     T_VAR,
-	"int":     T_INT,
-	"float":   T_FLOAT,
-	"bool":    T_BOOL,
-	"string":  T_STRING,
-	"if":      T_IF,
-	"else":    T_ELSE,
-	"for":     T_FOR,
-	"true":    T_TRUE,
-	"false":   T_FALSE,
-}
-
-// Struct responsável por percorrer o código-fonte
-// e transformar caracteres em tokens.
 type Scanner struct {
-	input []rune // Código-fonte de entrada
-	pos   int    // Posição atual de leitura
-	line  int    // Linha atual da análise
+	source   []rune
+	pos      int
+	line     int
+	lastType Token
 }
 
-// NewScanner inicializa um novo Scanner para o código-fonte fornecido.
 func NewScanner(source string) *Scanner {
-	return &Scanner{
-		input: []rune(source),
-		pos:   0,
-		line:  1,
-	}
+	return &Scanner{source: []rune(source), pos: 0, line: 1, lastType: EOF}
 }
 
-// peek retorna o caractere atual sem avançar na leitura.
-// Se chegar ao fim da entrada, retorna 0 (equivalente ao '\0' do C++).
 func (s *Scanner) peek() rune {
-	if s.pos >= len(s.input) {
+	if s.pos >= len(s.source) {
 		return 0
 	}
-	return s.input[s.pos]
+	return s.source[s.pos]
 }
 
-// next retorna o caractere atual e avança para a próxima posição.
+// peekAt retorna o caractere na posição pos+offset sem avançar.
+func (s *Scanner) peekAt(offset int) rune {
+	i := s.pos + offset
+	if i >= len(s.source) {
+		return 0
+	}
+	return s.source[i]
+}
+
 func (s *Scanner) next() rune {
 	c := s.peek()
 	if c != 0 {
@@ -59,287 +40,358 @@ func (s *Scanner) next() rune {
 	return c
 }
 
-// skipWhitespace ignora espaços em branco, tabulações e quebras de linha.
-// Sempre que encontra '\n', incrementa o contador de linhas.
+// skipWhitespace ignora espaços, tabs e \r — mas NÃO \n.
+// \n é tratado em NextToken para inserção automática de ';'.
 func (s *Scanner) skipWhitespace() {
-	for unicode.IsSpace(s.peek()) {
-		if s.next() == '\n' {
-			s.line++
-		}
+	for s.peek() == ' ' || s.peek() == '\t' || s.peek() == '\r' {
+		s.next()
 	}
 }
 
-// skipComment ignora comentários de uma linha iniciados por "//".
-// Continua lendo até o final da linha ou fim da entrada.
-func (s *Scanner) skipComment() {
+func (s *Scanner) skipLineComment() {
 	for s.peek() != '\n' && s.peek() != 0 {
 		s.next()
 	}
 }
 
-// skipBlockComment ignora comentários de bloco iniciados por "/*" e fechados por "*/".
-// Incrementa o contador de linhas ao encontrar quebras de linha dentro
-// do bloco. Retorna erro léxico se o bloco não for fechado.
 func (s *Scanner) skipBlockComment() error {
 	for s.peek() != 0 {
 		c := s.next()
-
-		// Controla a contagem de linhas dentro do bloco
 		if c == '\n' {
 			s.line++
 		}
-
-		// Verifica se encontrou o fechamento "*/"
 		if c == '*' && s.peek() == '/' {
-			s.next() // consome o '/'
+			s.next()
 			return nil
 		}
 	}
-
-	// Chegou ao fim da entrada sem fechar o bloco
-	return fmt.Errorf("Erro lexico: comentario de bloco nao fechado na linha: %d", s.line)
+	return fmt.Errorf("comentario de bloco nao fechado na linha %d", s.line)
 }
 
-// scanNumber lê um número inteiro ou float a partir do primeiro dígito já encontrado.
-func (s *Scanner) scanNumber(start rune) (Token, error) {
-	buf := []rune{start}
-
-	// Enquanto não encontrar um ponto não é um float
-	isFloat := false
-
-	// Continua enquanto encontrar outros dígitos ou ponto decimal
-	for unicode.IsDigit(s.peek()) || s.peek() == '.' {
-		// Se encontrar um ponto, marca que é um float
-		if s.peek() == '.' {
-			// Se já tiver um ponto, é um float inválido
-			if isFloat {
-				return Token{}, fmt.Errorf(
-					"Erro lexico: float invalido: %s na linha: %d",
-					string(buf), s.line,
-				)
-			}
-			isFloat = true
-		}
-		buf = append(buf, s.next())
+// tokenRequiresSemicolon implementa a regra de inserção automática de ';' do Go.
+// Ref: https://go.dev/ref/spec#Semicolons
+func tokenRequiresSemicolon(t Token) bool {
+	switch t {
+	case IDENT, INT, FLOAT, IMAG, CHAR, STRING,
+		BREAK, CONTINUE, RETURN,
+		INC, DEC, RPAREN, RBRACK, RBRACE:
+		return true
 	}
-
-	// Retorna um token float
-	if isFloat {
-		return Token{T_FLOAT_NUM, string(buf), s.line}, nil
-	}
-
-	// Retorna um token numérico
-	return Token{T_NUM, string(buf), s.line}, nil
+	return false
 }
 
-// scanIdentifier lê identificadores ou palavras reservadas.
-// Um identificador pode conter letras, números e underscore.
-func (s *Scanner) scanIdentifier(start rune) Token {
-	// Adiciona o primeiro caractere já lido
-	buf := []rune{start}
-
-	// Continua lendo enquanto o padrão for válido para identificador
-	for isIdentRune(s.peek()) {
-		buf = append(buf, s.next())
-	}
-
-	lexeme := string(buf)
-
-	// Verifica se o texto lido é uma palavra reservada
-	if tt, ok := keywords[lexeme]; ok {
-		return Token{tt, lexeme, s.line}
-	}
-
-	// Caso contrário, trata como identificador comum
-	return Token{T_ID, lexeme, s.line}
-}
-
-// scanString lê uma string literal delimitada pelo caractere recebido em start.
-// O lexema incluirá os delimitadores de abertura e fechamento.
-// Valida sequências de escape. Retorna erro léxico se a string não for
-// fechada ou se encontrar um escape inválido.
-func (s *Scanner) scanString(start rune) (Token, error) {
-	// Inclui o delimitador de abertura no lexema
-	buf := []rune{start}
-
-	// Lê até encontrar o delimitador de fechamento ou fim da entrada
-	// Usa start como delimitador
-	for s.peek() != start && s.peek() != 0 {
-		if s.peek() == '\\' {
-			buf = append(buf, s.next()) // consome a barra invertida
-
-			// Valida o caractere de escape
-			escaped := s.peek()
-			switch escaped {
-			case 'n', 't', '\\', '"', '\'', 'r':
-				buf = append(buf, s.next())
-			default:
-				return Token{}, fmt.Errorf(
-					"Erro lexico: escape invalido '\\%c' na linha %d",
-					escaped, s.line,
-				)
-			}
-			continue
-		}
-
-		// Controla linhas dentro de strings multilinha
-		if s.peek() == '\n' {
-			s.line++
-		}
-		buf = append(buf, s.next())
-	}
-
-	// Se chegou ao fim sem fechar a string, retorna erro
-	if s.peek() == 0 {
-		return Token{}, fmt.Errorf(
-			"Erro lexico: string nao fechada na linha: %d", s.line,
-		)
-	}
-
-	// Consome e inclui o delimitador de fechamento
-	buf = append(buf, s.next())
-
-	return Token{T_STRING_LITERAL, string(buf), s.line}, nil
-}
-
-// NextToken é o método principal do scanner:
-// retorna o próximo token encontrado na entrada.
-func (s *Scanner) NextToken() (Token, error) {
-	// Primeiro, ignora espaços em branco
+func (s *Scanner) NextToken() (TokenData, error) {
 	s.skipWhitespace()
 
-	// Se chegou ao fim da entrada, retorna EOF com lexema visível
-	if s.pos >= len(s.input) {
-		return Token{T_EOF, "EOF", s.line}, nil
+	// Inserção automática de ';' ao encontrar \n
+	if s.peek() == '\n' {
+		s.next()
+		s.line++
+		if tokenRequiresSemicolon(s.lastType) {
+			s.lastType = SEMICOLON
+			return TokenData{SEMICOLON, ";", s.line - 1}, nil
+		}
+		return s.NextToken()
 	}
 
-	// Lê o próximo caractere
+	// EOF — emite ';' pendente se necessário
+	if s.pos >= len(s.source) {
+		if tokenRequiresSemicolon(s.lastType) {
+			s.lastType = SEMICOLON
+			return TokenData{SEMICOLON, ";", s.line}, nil
+		}
+		return TokenData{EOF, "EOF", s.line}, nil
+	}
+
 	c := s.next()
+	startLine := s.line
 
-	// Se começar com dígito, tenta formar um número
+	// ── Números ──────────────────────────────────────────────────────
 	if unicode.IsDigit(c) {
-		return s.scanNumber(c)
+		buf := []rune{c}
+		isFloat := false
+		isImag := false
+		for unicode.IsDigit(s.peek()) || s.peek() == '.' || s.peek() == 'i' {
+			if s.peek() == '.' {
+				isFloat = true
+			}
+			if s.peek() == 'i' {
+				isImag = true
+				buf = append(buf, s.next())
+				break
+			}
+			buf = append(buf, s.next())
+		}
+		if isImag {
+			return s.emit(IMAG, string(buf), startLine)
+		}
+		if isFloat {
+			return s.emit(FLOAT, string(buf), startLine)
+		}
+		return s.emit(INT, string(buf), startLine)
 	}
 
-	// Se começar com letra ou underscore, tenta formar identificador
+	// ── Identificadores e palavras reservadas ─────────────────────────
 	if unicode.IsLetter(c) || c == '_' {
-		return s.scanIdentifier(c), nil
+		buf := []rune{c}
+		for unicode.IsLetter(s.peek()) || unicode.IsDigit(s.peek()) || s.peek() == '_' {
+			buf = append(buf, s.next())
+		}
+		lex := string(buf)
+		return s.emit(Lookup(lex), lex, startLine)
 	}
 
-	// Analisa símbolos e operadores
 	switch c {
+
+	// ── Strings ───────────────────────────────────────────────────────
+	case '"':
+		buf := []rune{c}
+		for s.peek() != '"' && s.peek() != 0 {
+			if s.peek() == '\\' {
+				buf = append(buf, s.next()) // consome '\'
+				escaped := s.peek()
+				switch escaped {
+				case 'n', 't', 'r', '\\', '"', '\'':
+					buf = append(buf, s.next())
+				default:
+					return TokenData{}, fmt.Errorf("escape invalido '\\%c' linha %d", escaped, startLine)
+				}
+				continue
+			}
+			if s.peek() == '\n' {
+				return TokenData{}, fmt.Errorf("string nao fechada linha %d", startLine)
+			}
+			buf = append(buf, s.next())
+		}
+		if s.peek() == 0 {
+			return TokenData{}, fmt.Errorf("string nao fechada linha %d", startLine)
+		}
+		buf = append(buf, s.next()) // consome '"' de fechamento
+		return s.emit(STRING, string(buf), startLine)
+
+	// ── Raw string literal (backtick) ───────────────────────────────
+	// Em Go, `...` é uma raw string: sem escapes, \n é literal.
+	case '`':
+		buf := []rune{c}
+		for s.peek() != '`' && s.peek() != 0 {
+			if s.peek() == '\n' {
+				s.line++
+			}
+			buf = append(buf, s.next())
+		}
+		if s.peek() == 0 {
+			return TokenData{}, fmt.Errorf("raw string nao fechada linha %d", startLine)
+		}
+		buf = append(buf, s.next()) // consome '`' de fechamento
+		return s.emit(STRING, string(buf), startLine)
+
+	// ── Char literal ─────────────────────────────────────────────────
+	case '\'':
+		buf := []rune{c}
+		for s.peek() != '\'' && s.peek() != 0 {
+			if s.peek() == '\\' {
+				buf = append(buf, s.next())
+			}
+			buf = append(buf, s.next())
+		}
+		if s.peek() == 0 {
+			return TokenData{}, fmt.Errorf("char literal nao fechado linha %d", startLine)
+		}
+		buf = append(buf, s.next())
+		return s.emit(CHAR, string(buf), startLine)
+
+	// ── Operadores aritméticos ────────────────────────────────────────
 	case '+':
-		return Token{T_PLUS, "+", s.line}, nil
+		if s.peek() == '+' {
+			s.next()
+			return s.emit(INC, "++", startLine)
+		}
+		if s.peek() == '=' {
+			s.next()
+			return s.emit(ADD_ASSIGN, "+=", startLine)
+		}
+		return s.emit(ADD, "+", startLine)
 
 	case '-':
-		return Token{T_MINUS, "-", s.line}, nil
+		if s.peek() == '-' {
+			s.next()
+			return s.emit(DEC, "--", startLine)
+		}
+		if s.peek() == '=' {
+			s.next()
+			return s.emit(SUB_ASSIGN, "-=", startLine)
+		}
+		return s.emit(SUB, "-", startLine)
 
 	case '*':
-		return Token{T_MULT, "*", s.line}, nil
+		if s.peek() == '=' {
+			s.next()
+			return s.emit(MUL_ASSIGN, "*=", startLine)
+		}
+		return s.emit(MUL, "*", startLine)
 
 	case '/':
-		// Se houver outro '/', então é comentário de linha
 		if s.peek() == '/' {
-			s.next()             // consome o segundo '/'
-			s.skipComment()      // ignora o restante da linha
-			return s.NextToken() // busca o próximo token válido
+			s.next()
+			s.skipLineComment()
+			return s.NextToken()
 		}
-
-		// Se houver '*', então é comentário de bloco /* ... */
 		if s.peek() == '*' {
-			s.next()                                     // consome o '*'
-			if err := s.skipBlockComment(); err != nil { // ignora até encontrar '*/'
-				return Token{}, err
+			s.next()
+			if err := s.skipBlockComment(); err != nil {
+				return TokenData{}, err
 			}
-			return s.NextToken() // busca o próximo token válido
+			return s.NextToken()
 		}
-
-		return Token{T_DIV, "/", s.line}, nil
-
-	case '"':
-		return s.scanString(c)
-
-	case '=':
-		// Verifica se é "==" (igualdade)
 		if s.peek() == '=' {
 			s.next()
-			return Token{T_EQ, "==", s.line}, nil
+			return s.emit(QUO_ASSIGN, "/=", startLine)
 		}
+		return s.emit(QUO, "/", startLine)
 
-		// Caso contrário, é "=" (atribuição)
-		return Token{T_ASSIGN, "=", s.line}, nil
+	case '%':
+		if s.peek() == '=' {
+			s.next()
+			return s.emit(REM_ASSIGN, "%=", startLine)
+		}
+		return s.emit(REM, "%", startLine)
 
+	// ── Operadores bit a bit ──────────────────────────────────────────
+	case '&':
+		if s.peek() == '&' {
+			s.next()
+			return s.emit(LAND, "&&", startLine)
+		}
+		if s.peek() == '=' {
+			s.next()
+			return s.emit(AND_ASSIGN, "&=", startLine)
+		}
+		return s.emit(AND, "&", startLine)
+
+	case '|':
+		if s.peek() == '|' {
+			s.next()
+			return s.emit(LOR, "||", startLine)
+		}
+		if s.peek() == '=' {
+			s.next()
+			return s.emit(OR_ASSIGN, "|=", startLine)
+		}
+		return s.emit(OR, "|", startLine)
+
+	case '^':
+		if s.peek() == '=' {
+			s.next()
+			return s.emit(XOR_ASSIGN, "^=", startLine)
+		}
+		return s.emit(XOR, "^", startLine)
+
+	case '~':
+		return s.emit(TILDE, "~", startLine)
+
+	// ── Shifts ────────────────────────────────────────────────────────
 	case '<':
-		// Verifica se é "<=" (menor ou igual)
+		if s.peek() == '<' {
+			s.next()
+			if s.peek() == '=' {
+				s.next()
+				return s.emit(SHL_ASSIGN, "<<=", startLine)
+			}
+			return s.emit(SHL, "<<", startLine)
+		}
 		if s.peek() == '=' {
 			s.next()
-			return Token{T_LE, "<=", s.line}, nil
+			return s.emit(LEQ, "<=", startLine)
 		}
-		return Token{T_LT, "<", s.line}, nil
+		return s.emit(LSS, "<", startLine)
 
 	case '>':
-		// Verifica se é ">=" (maior ou igual)
+		if s.peek() == '>' {
+			s.next()
+			if s.peek() == '=' {
+				s.next()
+				return s.emit(SHR_ASSIGN, ">>=", startLine)
+			}
+			return s.emit(SHR, ">>", startLine)
+		}
 		if s.peek() == '=' {
 			s.next()
-			return Token{T_GE, ">=", s.line}, nil
+			return s.emit(GEQ, ">=", startLine)
 		}
-		return Token{T_GT, ">", s.line}, nil
+		return s.emit(GTR, ">", startLine)
 
-	case '(':
-		return Token{T_LPAREN, "(", s.line}, nil
+	// ── Comparação / atribuição ───────────────────────────────────────
+	case '=':
+		if s.peek() == '=' {
+			s.next()
+			return s.emit(EQL, "==", startLine)
+		}
+		return s.emit(ASSIGN, "=", startLine)
 
-	case ')':
-		return Token{T_RPAREN, ")", s.line}, nil
-
-	case '{':
-		return Token{T_LBRACE, "{", s.line}, nil
-
-	case '}':
-		return Token{T_RBRACE, "}", s.line}, nil
-
-	case ';':
-		return Token{T_SEMICOLON, ";", s.line}, nil
-
-	case '.':
-		return Token{T_DOT, ".", s.line}, nil
-
-	case ',':
-		return Token{T_COMMA, ",", s.line}, nil
+	case '!':
+		if s.peek() == '=' {
+			s.next()
+			return s.emit(NEQ, "!=", startLine)
+		}
+		return s.emit(NOT, "!", startLine)
 
 	case ':':
 		if s.peek() == '=' {
 			s.next()
-			return Token{T_DECLARE_ASSIGN, ":=", s.line}, nil
+			return s.emit(DEFINE, ":=", startLine)
 		}
-		return Token{T_COLON, ":", s.line}, nil
+		return s.emit(COLON, ":", startLine)
+
+	// ── Ellipsis ──────────────────────────────────────────────────────
+	case '.':
+		if s.peek() == '.' && s.peekAt(1) == '.' {
+			s.next()
+			s.next()
+			return s.emit(ELLIPSIS, "...", startLine)
+		}
+		return s.emit(PERIOD, ".", startLine)
+
+	// ── Agrupamento ───────────────────────────────────────────────────
+	case '(':
+		return s.emit(LPAREN, "(", startLine)
+	case ')':
+		return s.emit(RPAREN, ")", startLine)
+	case '[':
+		return s.emit(LBRACK, "[", startLine)
+	case ']':
+		return s.emit(RBRACK, "]", startLine)
+	case '{':
+		return s.emit(LBRACE, "{", startLine)
+	case '}':
+		return s.emit(RBRACE, "}", startLine)
+
+	// ── Delimitadores ─────────────────────────────────────────────────
+	case ';':
+		return s.emit(SEMICOLON, ";", startLine)
+	case ',':
+		return s.emit(COMMA, ",", startLine)
 	}
 
-	// Se encontrar um caractere que não pertence à linguagem,
-	// retorna erro léxico informando o símbolo e a linha.
-	return Token{}, fmt.Errorf(
-		"Erro Lexico: caractere invalido '%c' na linha %d", c, s.line,
-	)
+	return TokenData{}, fmt.Errorf("caractere invalido '%c' linha %d", c, startLine)
 }
 
-// Tokenize percorre toda a entrada e retorna todos os tokens,
-// incluindo o token EOF final. Interrompe e retorna erro no primeiro
-// problema léxico encontrado.
-func (s *Scanner) Tokenize() ([]Token, error) {
-	var tokens []Token
+// emit atualiza lastType e retorna o TokenData — ponto único de saída.
+func (s *Scanner) emit(t Token, lex string, line int) (TokenData, error) {
+	s.lastType = t
+	return TokenData{t, lex, line}, nil
+}
+
+func (s *Scanner) Tokenize() ([]TokenData, error) {
+	var tokens []TokenData
 	for {
 		tok, err := s.NextToken()
 		if err != nil {
 			return nil, err
 		}
 		tokens = append(tokens, tok)
-		if tok.Type == T_EOF {
+		if tok.Type == EOF {
 			break
 		}
 	}
 	return tokens, nil
-}
-
-// isIdentRune reporta se r é válido no interior de um identificador.
-func isIdentRune(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
 }
