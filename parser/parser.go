@@ -1,105 +1,48 @@
-package parser
+package lexer
 
 import (
 	"fmt"
 	"strconv"
-	"strings"
+
+	"go-compiler/lexer"
 )
 
 // =====================================================================
-// PARTE 2: A ÁRVORE SINTÁTICA ABSTRATA (AST - ABSTRACT SYNTAX TREE)
+// PARSER DESCENDENTE RECURSIVO
 // =====================================================================
-// O Parser não gera apenas um "Sim/Não". Ele constrói uma árvore na memória!
-// Nessa árvore, nós internos são operações (como "+" ou "atribuição")
-// e as folhas são dados (como números ou variáveis).
-// Em Go, polimorfismo é expresso por interfaces — não por herança.
-// =====================================================================
-
-func pad(n int) string { return strings.Repeat(" ", n) }
-
-// ── Nó Raiz: lista de comandos do programa ───────────────────────────
-
-type ProgramNode struct {
-	Statements []ASTNode
-}
-
-func (n *ProgramNode) Print(indent int) {
-	fmt.Printf("%sProgramNode (Inicio do Programa)\n", pad(indent))
-	for _, stmt := range n.Statements {
-		stmt.Print(indent + 2)
-	}
-}
-
-// ── VarDeclNode: "int x = 10;" ───────────────────────────────────────
-
-type VarDeclNode struct {
-	Name        string
-	Initializer ASTNode // nil se não houver valor inicial
-}
-
-func (n *VarDeclNode) Print(indent int) {
-	fmt.Printf("%sVarDeclNode (Declaracao de Variavel: %s)\n", pad(indent), n.Name)
-	if n.Initializer != nil {
-		n.Initializer.Print(indent + 4)
-	}
-}
-
-// ── AssignNode: "x = 20;" ────────────────────────────────────────────
-
-type AssignNode struct {
-	Name string
-	Expr ASTNode
-}
-
-func (n *AssignNode) Print(indent int) {
-	fmt.Printf("%sAssignNode (Atribuicao a variavel: %s)\n", pad(indent), n.Name)
-	n.Expr.Print(indent + 4)
-}
-
-// ── PrintNode: "print(soma);" ────────────────────────────────────────
-
-type PrintNode struct {
-	Expr ASTNode
-}
-
-func (n *PrintNode) Print(indent int) {
-	fmt.Printf("%sPrintNode (Comando Print)\n", pad(indent))
-	n.Expr.Print(indent + 4)
-}
-
-// ── IfNode: "if (cond) { ... } else { ... }" ─────────────────────────
-
-type IfNode struct {
-	Condition  ASTNode
-	ThenBranch []ASTNode
-	ElseBranch []ASTNode // vazio se não houver else
-}package parser
-
-import (
-	"fmt"
-
-	"modulariza/lexer"
-)
-
-// =====================================================================
-// PARTE 3: O ANALISADOR SINTÁTICO (PARSER DESCENDENTE RECURSIVO)
-// =====================================================================
-// Cada regra da gramática vira diretamente uma função em Go.
-// O parser dá uma "espiada" (Lookahead) no próximo token via peek()
-// para decidir qual caminho seguir — sem backtracking.
+// Recebe a lista de tokens do Scanner e constrói a AST.
+// Cada método corresponde a uma regra da gramática.
+//
+// Gramática base (linguagem Go compilada):
+//   Program    → Statement*
+//   Statement  → VarDecl | Assignment | PrintStmt | IfStmt | ForStmt
+//   VarDecl    → "var" ID Type [ "=" Expr ] ";"
+//              | ID ":=" Expr ";"
+//   Assignment → ID "=" Expr ";"
+//   PrintStmt  → "fmt" "." "Println" "(" Expr ")" ";"
+//   IfStmt     → "if" Expr "{" Statement* "}" [ "else" ( IfStmt | "{" Statement* "}" ) ]
+//   ForStmt    → "for" Expr "{" Statement* "}"
+//   Expr       → SimpleExpr [ ( "==" | "<" | ">" | "<=" | ">=" ) SimpleExpr ]
+//   SimpleExpr → Term ( ( "+" | "-" ) Term )*
+//   Term       → Factor ( ( "*" | "/" ) Factor )*
+//   Factor     → NUMBER | FLOAT_NUM | STRING_LITERAL | ID | "(" Expr ")"
 // =====================================================================
 
 type Parser struct {
 	tokens []lexer.Token
 	pos    int
+	errors []error
 }
 
 func NewParser(tokens []lexer.Token) *Parser {
 	return &Parser{tokens: tokens}
 }
 
-// ── helpers de lookahead ─────────────────────────────────────────────
+func (p *Parser) Errors() []error { return p.errors }
 
+// ─── helpers ───────────────────────────────────────────────────────
+
+// peek retorna o tipo do token atual sem consumi-lo (lookahead).
 func (p *Parser) peek() lexer.TokenType {
 	if p.pos >= len(p.tokens) {
 		return lexer.T_EOF
@@ -107,609 +50,341 @@ func (p *Parser) peek() lexer.TokenType {
 	return p.tokens[p.pos].Type
 }
 
+// peekToken retorna o token atual completo.
 func (p *Parser) peekToken() lexer.Token {
 	if p.pos >= len(p.tokens) {
-		return lexer.Token{Type: lexer.T_EOF, Lexeme: "", Line: -1}
+		return lexer.Token{Type: lexer.T_EOF}
 	}
 	return p.tokens[p.pos]
 }
 
-// advance avança o ponteiro e retorna o token consumido.
+// advance consome o token atual e retorna ele.
 func (p *Parser) advance() lexer.Token {
-	t := p.peekToken()
-	if t.Type != lexer.T_EOF {
+	tok := p.peekToken()
+	if tok.Type != lexer.T_EOF {
 		p.pos++
 	}
-	return t
+	return tok
 }
 
-// match valida que o token atual é o esperado e o consome; retorna erro caso contrário.
-func (p *Parser) match(expected lexer.TokenType) error {
+// match valida que o token atual é do tipo esperado e o consome.
+// Se não for, registra o erro e retorna token vazio (Panic Mode).
+func (p *Parser) match(expected lexer.TokenType) (lexer.Token, error) {
 	if p.peek() == expected {
-		p.advance()
-		return nil
+		return p.advance(), nil
 	}
-	t := p.peekToken()
-	return fmt.Errorf("erro sintático na linha %d: esperava '%s' porém foi encontrado '%s'",
-		t.Line, expected, t.Lexeme)
+	err := fmt.Errorf("erro sintatico linha %d: esperava %s, encontrou %s (%q)",
+		p.peekToken().Line, expected, p.peek(), p.peekToken().Lexeme)
+	p.errors = append(p.errors, err)
+	return lexer.Token{}, err
 }
 
-func (p *Parser) syntaxError(msg string) error {
-	t := p.peekToken()
-	return fmt.Errorf("erro sintático na linha %d: %s", t.Line, msg)
+// sync avança tokens até um ponto seguro após um erro (Panic Mode).
+func (p *Parser) sync(msg string) {
+	tok := p.peekToken()
+	err := fmt.Errorf("erro sintatico linha %d: %s (encontrou %q)", tok.Line, msg, tok.Lexeme)
+	p.errors = append(p.errors, err)
+	for p.peek() != lexer.T_EOF && p.peek() != lexer.T_SEMICOLON && p.peek() != lexer.T_RBRACE {
+		p.advance()
+	}
+	if p.peek() == lexer.T_SEMICOLON {
+		p.advance()
+	}
 }
 
-// ── regras da gramática ──────────────────────────────────────────────
+// ─── Program ───────────────────────────────────────────────────────
 
-// Regra: Program -> Statement*
-func (p *Parser) ParseProgram() (*ProgramNode, error) {
+func (p *Parser) ParseProgram() *ProgramNode {
 	prog := &ProgramNode{}
 	for p.peek() != lexer.T_EOF {
-		stmt, err := p.parseStatement()
-		if err != nil {
-			return nil, err
+		if s := p.parseStatement(); s != nil {
+			prog.Statements = append(prog.Statements, s)
 		}
-		prog.Statements = append(prog.Statements, stmt)
 	}
-	return prog, nil
+	return prog
 }
 
-// Regra: Statement -> Declaration | Assignment | PrintStmt | IfStmt | WhileStmt
-// Usa LOOKAHEAD (peek) para decidir qual caminho seguir.
-func (p *Parser) parseStatement() (ASTNode, error) {
+// ─── Statement ─────────────────────────────────────────────────────
+
+func (p *Parser) parseStatement() ASTNode {
 	switch p.peek() {
-	case lexer.T_INT:
-		return p.parseDeclaration()
+
+	case lexer.T_VAR:
+		// var x int = expr;   ou   var x int;
+		return p.parseVarDecl()
+
 	case lexer.T_ID:
+		// Distingue  x := expr   de   x = expr
+		// e também   fmt.Println(...)
+		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Type == lexer.T_DECLARE_ASSIGN {
+			return p.parseShortVarDecl()
+		}
+		// fmt.Println(expr) — "fmt" é lexer.T_ID
+		if p.peekToken().Lexeme == "fmt" {
+			return p.parsePrintStmt()
+		}
 		return p.parseAssignment()
-	case lexer.T_PRINT:
-		return p.parsePrintStmt()
+
 	case lexer.T_IF:
 		return p.parseIfStmt()
-	case lexer.T_WHILE:
-		return p.parseWhileStmt()
+
+	case lexer.T_FOR:
+		return p.parseForStmt()
+
 	default:
-		return nil, p.syntaxError(
-			fmt.Sprintf("comando inválido ou não reconhecido: '%s'", p.peekToken().Lexeme),
-		)
-	}
-}
-
-// Regra: Declaration -> "int" ID [ "=" Expression ] ";"
-func (p *Parser) parseDeclaration() (ASTNode, error) {
-	if err := p.match(lexer.T_INT); err != nil {
-		return nil, err
-	}
-	idTok := p.peekToken()
-	if err := p.match(lexer.T_ID); err != nil {
-		return nil, err
-	}
-
-	var initializer ASTNode
-	if p.peek() == lexer.T_ASSIGN {
-		p.advance()
-		var err error
-		initializer, err = p.parseExpression()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if err := p.match(lexer.T_SEMICOLON); err != nil {
-		return nil, err
-	}
-	return &VarDeclNode{Name: idTok.Lexeme, Initializer: initializer}, nil
-}
-
-// Regra: Assignment -> ID "=" Expression ";"
-func (p *Parser) parseAssignment() (ASTNode, error) {
-	idTok := p.peekToken()
-	if err := p.match(lexer.T_ID); err != nil {
-		return nil, err
-	}
-	if err := p.match(lexer.T_ASSIGN); err != nil {
-		return nil, err
-	}
-	expr, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	if err := p.match(lexer.T_SEMICOLON); err != nil {
-		return nil, err
-	}
-	return &AssignNode{Name: idTok.Lexeme, Expr: expr}, nil
-}
-
-// Regra: PrintStmt -> "print" "(" Expression ")" ";"
-func (p *Parser) parsePrintStmt() (ASTNode, error) {
-	if err := p.match(lexer.T_PRINT); err != nil {
-		return nil, err
-	}
-	if err := p.match(lexer.T_LPAREN); err != nil {
-		return nil, err
-	}
-	expr, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	if err := p.match(lexer.T_RPAREN); err != nil {
-		return nil, err
-	}
-	if err := p.match(lexer.T_SEMICOLON); err != nil {
-		return nil, err
-	}
-	return &PrintNode{Expr: expr}, nil
-}
-
-// Regra: IfStmt -> "if" "(" Expression ")" "{" Statement* "}" [ "else" "{" Statement* "}" ]
-func (p *Parser) parseIfStmt() (ASTNode, error) {
-	if err := p.match(lexer.T_IF); err != nil {
-		return nil, err
-	}
-	if err := p.match(lexer.T_LPAREN); err != nil {
-		return nil, err
-	}
-	cond, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	if err := p.match(lexer.T_RPAREN); err != nil {
-		return nil, err
-	}
-
-	thenBranch, err := p.parseBlock()
-	if err != nil {
-		return nil, err
-	}
-
-	var elseBranch []ASTNode
-	if p.peek() == lexer.T_ELSE {
-		p.advance()
-		elseBranch, err = p.parseBlock()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return &IfNode{Condition: cond, ThenBranch: thenBranch, ElseBranch: elseBranch}, nil
-}
-
-// Regra: WhileStmt -> "while" "(" Expression ")" "{" Statement* "}"
-func (p *Parser) parseWhileStmt() (ASTNode, error) {
-	if err := p.match(lexer.T_WHILE); err != nil {
-		return nil, err
-	}
-	if err := p.match(lexer.T_LPAREN); err != nil {
-		return nil, err
-	}
-	cond, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	if err := p.match(lexer.T_RPAREN); err != nil {
-		return nil, err
-	}
-	body, err := p.parseBlock()
-	if err != nil {
-		return nil, err
-	}
-	return &WhileNode{Condition: cond, Body: body}, nil
-}
-
-// parseBlock lê "{" Statement* "}" e retorna a lista de nós.
-func (p *Parser) parseBlock() ([]ASTNode, error) {
-	if err := p.match(lexer.T_LBRACE); err != nil {
-		return nil, err
-	}
-	var stmts []ASTNode
-	for p.peek() != lexer.T_RBRACE && p.peek() != lexer.T_EOF {
-		stmt, err := p.parseStatement()
-		if err != nil {
-			return nil, err
-		}
-		stmts = append(stmts, stmt)
-	}
-	if err := p.match(lexer.T_RBRACE); err != nil {
-		return nil, err
-	}
-	return stmts, nil
-}
-
-func (n *IfNode) Print(indent int) {
-	fmt.Printf("%sIfNode (Condicional IF)\n", pad(indent))
-	fmt.Printf("%sCondicao:\n", pad(indent+2))
-	n.Condition.Print(indent + 4)
-
-	fmt.Printf("%sBloco 'Então':\n", pad(indent+2))
-	for _, stmt := range n.ThenBranch {
-		stmt.Print(indent + 4)
-	}
-
-	if len(n.ElseBranch) > 0 {
-		fmt.Printf("%sBloco 'Senão':\n", pad(indent+2))
-		for _, stmt := range n.ElseBranch {
-			stmt.Print(indent + 4)
-		}
-	}
-}
-
-// ── WhileNode: "while (cond) { ... }" ────────────────────────────────
-
-type WhileNode struct {
-	Condition ASTNode
-	Body      []ASTNode
-}
-
-func (n *WhileNode) Print(indent int) {
-	fmt.Printf("%sWhileNode (Laco de Repeticao WHILE)\n", pad(indent))
-	fmt.Printf("%sCondicao de entrada:\n", pad(indent+2))
-	n.Condition.Print(indent + 4)
-
-	fmt.Printf("%sCorpo do laco:\n", pad(indent+2))
-	for _, stmt := range n.Body {
-		stmt.Print(indent + 4)
-	}
-}
-
-// ── BinaryOpNode: left OP right ──────────────────────────────────────
-
-type BinaryOpNode struct {
-	Op    scanner.TokenType
-	Left  ASTNode
-	Right ASTNode
-}
-
-func (n *BinaryOpNode) Print(indent int) {
-	fmt.Printf("%sBinaryOpNode (Operacao Binaria: %s)\n", pad(indent), n.Op)
-	n.Left.Print(indent + 4)
-	n.Right.Print(indent + 4)
-}
-
-// ── NumberNode: literal inteiro (folha) ──────────────────────────────
-
-type NumberNode struct{ Value int }
-
-func (n *NumberNode) Print(indent int) {
-	fmt.Printf("%sNumberNode (Valor constante: %d)\n", pad(indent), n.Value)
-}
-
-// ── VariableNode: referência a variável (folha) ──────────────────────
-
-type VariableNode struct{ Name string }
-
-func (n *VariableNode) Print(indent int) {
-	fmt.Printf("%sVariableNode (Busca variavel: %s)\n", pad(indent), n.Name)
-}
-
-// =====================================================================
-// PARTE 3: O ANALISADOR SINTÁTICO (PARSER DESCENDENTE RECURSIVO)
-// =====================================================================
-// Cada regra da gramática vira diretamente uma função em Go.
-// O parser dá uma "espiada" (Lookahead) no próximo token via peek()
-// para decidir qual caminho seguir — sem backtracking.
-// =====================================================================
-
-type Parser struct {
-	tokens []scanner.Token
-	pos    int
-}
-
-func NewParser(tokens []scanner.Token) *Parser {
-	return &Parser{tokens: tokens}
-}
-
-// ── helpers de lookahead ─────────────────────────────────────────────
-
-func (p *Parser) peek() scanner.TokenType {
-	if p.pos >= len(p.tokens) {
-		return scanner.T_EOF
-	}
-	return p.tokens[p.pos].Type
-}
-
-func (p *Parser) peekToken() scanner.Token {
-	if p.pos >= len(p.tokens) {
-		return scanner.Token{Type: scanner.T_EOF, Lexeme: "", Line: -1}
-	}
-	return p.tokens[p.pos]
-}
-
-// advance avança o ponteiro e retorna o token consumido.
-func (p *Parser) advance() scanner.Token {
-	t := p.peekToken()
-	if t.Type != scanner.T_EOF {
-		p.pos++
-	}
-	return t
-}
-
-// match valida que o token atual é o esperado e o consome; retorna erro caso contrário.
-func (p *Parser) match(expected scanner.TokenType) error {
-	if p.peek() == expected {
-		p.advance()
+		p.sync("instrucao invalida")
 		return nil
 	}
-	t := p.peekToken()
-	return fmt.Errorf("erro sintático na linha %d: esperava '%s' porém foi encontrado '%s'",
-		t.Line, expected, t.Lexeme)
 }
 
-func (p *Parser) syntaxError(msg string) error {
-	t := p.peekToken()
-	return fmt.Errorf("erro sintático na linha %d: %s", t.Line, msg)
+// ─── VarDecl ───────────────────────────────────────────────────────
+// var x int = expr;   ou   var x int;
+
+func (p *Parser) parseVarDecl() ASTNode {
+	p.advance() // consome "var"
+
+	idTok, err := p.match(lexer.T_ID)
+	if err != nil {
+		return nil
+	}
+
+	// tipo: int | float | bool | string
+	if p.peek() != lexer.T_INT && p.peek() != lexer.T_FLOAT && p.peek() != lexer.T_BOOL && p.peek() != lexer.T_STRING {
+		p.sync("tipo esperado apos nome da variavel")
+		return nil
+	}
+	p.advance() // consome o tipo
+
+	var init ASTNode
+	if p.peek() == lexer.T_ASSIGN {
+		p.advance() // consome "="
+		init = p.parseExpr()
+	}
+
+	p.match(lexer.T_SEMICOLON)
+	return &VarDeclNode{Name: idTok.Lexeme, Initializer: init}
 }
 
-// ── regras da gramática ──────────────────────────────────────────────
+// ─── ShortVarDecl ──────────────────────────────────────────────────
+// x := expr;
 
-// Regra: Program -> Statement*
-func (p *Parser) ParseProgram() (*ProgramNode, error) {
-	prog := &ProgramNode{}
-	for p.peek() != scanner.T_EOF {
-		stmt, err := p.parseStatement()
-		if err != nil {
-			return nil, err
-		}
-		prog.Statements = append(prog.Statements, stmt)
-	}
-	return prog, nil
+func (p *Parser) parseShortVarDecl() ASTNode {
+	idTok := p.advance() // consome ID
+	p.advance()          // consome :=
+	expr := p.parseExpr()
+	p.match(lexer.T_SEMICOLON)
+	return &VarDeclNode{Name: idTok.Lexeme, Initializer: expr}
 }
 
-// Regra: Statement -> Declaration | Assignment | PrintStmt | IfStmt | WhileStmt
-// Usa LOOKAHEAD (peek) para decidir qual caminho seguir.
-func (p *Parser) parseStatement() (ASTNode, error) {
-	switch p.peek() {
-	case scanner.T_INT:
-		return p.parseDeclaration()
-	case scanner.T_ID:
-		return p.parseAssignment()
-	case scanner.T_PRINT:
-		return p.parsePrintStmt()
-	case scanner.T_IF:
-		return p.parseIfStmt()
-	case scanner.T_WHILE:
-		return p.parseWhileStmt()
-	default:
-		return nil, p.syntaxError(
-			fmt.Sprintf("comando inválido ou não reconhecido: '%s'", p.peekToken().Lexeme),
-		)
+// ─── Assignment ────────────────────────────────────────────────────
+// x = expr;
+
+func (p *Parser) parseAssignment() ASTNode {
+	idTok := p.advance() // consome ID
+	if _, err := p.match(lexer.T_ASSIGN); err != nil {
+		return nil
 	}
+	expr := p.parseExpr()
+	p.match(lexer.T_SEMICOLON)
+	return &AssignNode{Name: idTok.Lexeme, Expr: expr}
 }
 
-// Regra: Declaration -> "int" ID [ "=" Expression ] ";"
-func (p *Parser) parseDeclaration() (ASTNode, error) {
-	if err := p.match(scanner.T_INT); err != nil {
-		return nil, err
-	}
-	idTok := p.peekToken()
-	if err := p.match(scanner.T_ID); err != nil {
-		return nil, err
+// ─── PrintStmt ─────────────────────────────────────────────────────
+// fmt.Println(expr);
+// O scanner emite:  lexer.T_ID("fmt")  lexer.T_COLON(":") — não, "." não é token.
+// Na verdade o scanner não tem token para ".".
+// Vamos consumir "fmt" lexer.T_ID, depois o "." como erro silencioso
+// lendo o próximo char, depois "Println" lexer.T_ID.
+
+func (p *Parser) parsePrintStmt() ASTNode {
+	p.advance() // consome "fmt"  (lexer.T_ID)
+
+	// O scanner não tokeniza "." — ele vai gerar um erro léxico.
+	// Por isso aceitamos também a forma simples: Println(expr);
+	// Se o próximo for lexer.T_ID "Println", já está bom.
+	// Se vier lexer.T_COLON é porque o scanner leu ":" de algum jeito — avança.
+	if p.peek() == lexer.T_COLON {
+		p.advance() // consome ":"  (parte do "." que o scanner pode gerar como erro)
 	}
 
-	var initializer ASTNode
-	if p.peek() == scanner.T_ASSIGN {
+	// consome "Println"
+	if p.peek() == lexer.T_ID {
 		p.advance()
-		var err error
-		initializer, err = p.parseExpression()
-		if err != nil {
-			return nil, err
-		}
 	}
 
-	if err := p.match(scanner.T_SEMICOLON); err != nil {
-		return nil, err
+	if _, err := p.match(lexer.T_LPAREN); err != nil {
+		return nil
 	}
-	return &VarDeclNode{Name: idTok.Lexeme, Initializer: initializer}, nil
+	expr := p.parseExpr()
+	if _, err := p.match(lexer.T_RPAREN); err != nil {
+		return nil
+	}
+	p.match(lexer.T_SEMICOLON)
+	return &PrintCallNode{Expr: expr}
 }
 
-// Regra: Assignment -> ID "=" Expression ";"
-func (p *Parser) parseAssignment() (ASTNode, error) {
-	idTok := p.peekToken()
-	if err := p.match(scanner.T_ID); err != nil {
-		return nil, err
-	}
-	if err := p.match(scanner.T_ASSIGN); err != nil {
-		return nil, err
-	}
-	expr, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	if err := p.match(scanner.T_SEMICOLON); err != nil {
-		return nil, err
-	}
-	return &AssignNode{Name: idTok.Lexeme, Expr: expr}, nil
-}
+// ─── IfStmt ────────────────────────────────────────────────────────
+// if (cond) { ... }  else if (cond) { ... }  else { ... }
+// Em Go a condição não usa parênteses, mas o professor usa — aceitamos os dois.
 
-// Regra: PrintStmt -> "print" "(" Expression ")" ";"
-func (p *Parser) parsePrintStmt() (ASTNode, error) {
-	if err := p.match(scanner.T_PRINT); err != nil {
-		return nil, err
-	}
-	if err := p.match(scanner.T_LPAREN); err != nil {
-		return nil, err
-	}
-	expr, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	if err := p.match(scanner.T_RPAREN); err != nil {
-		return nil, err
-	}
-	if err := p.match(scanner.T_SEMICOLON); err != nil {
-		return nil, err
-	}
-	return &PrintNode{Expr: expr}, nil
-}
+func (p *Parser) parseIfStmt() ASTNode {
+	p.advance() // consome "if"
 
-// Regra: IfStmt -> "if" "(" Expression ")" "{" Statement* "}" [ "else" "{" Statement* "}" ]
-func (p *Parser) parseIfStmt() (ASTNode, error) {
-	if err := p.match(scanner.T_IF); err != nil {
-		return nil, err
-	}
-	if err := p.match(scanner.T_LPAREN); err != nil {
-		return nil, err
-	}
-	cond, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	if err := p.match(scanner.T_RPAREN); err != nil {
-		return nil, err
-	}
-
-	thenBranch, err := p.parseBlock()
-	if err != nil {
-		return nil, err
-	}
-
-	var elseBranch []ASTNode
-	if p.peek() == scanner.T_ELSE {
+	// parênteses opcionais ao redor da condição
+	hasParen := p.peek() == lexer.T_LPAREN
+	if hasParen {
 		p.advance()
-		elseBranch, err = p.parseBlock()
-		if err != nil {
-			return nil, err
+	}
+	cond := p.parseExpr()
+	if hasParen {
+		p.match(lexer.T_RPAREN)
+	}
+
+	if _, err := p.match(lexer.T_LBRACE); err != nil {
+		return nil
+	}
+	thenBranch := p.parseBlock()
+	p.match(lexer.T_RBRACE)
+
+	node := &IfNode{Condition: cond, ThenBranch: thenBranch}
+
+	for p.peek() == lexer.T_ELSE {
+		p.advance() // consome "else"
+		if p.peek() == lexer.T_IF {
+			// else if
+			p.advance() // consome "if"
+			hasParen2 := p.peek() == lexer.T_LPAREN
+			if hasParen2 {
+				p.advance()
+			}
+			eic := p.parseExpr()
+			if hasParen2 {
+				p.match(lexer.T_RPAREN)
+			}
+			p.match(lexer.T_LBRACE)
+			eib := p.parseBlock()
+			p.match(lexer.T_RBRACE)
+			node.ElseIfBlocks = append(node.ElseIfBlocks, ElseIfBlock{Condition: eic, Body: eib})
+		} else {
+			// else simples
+			p.match(lexer.T_LBRACE)
+			node.ElseBranch = p.parseBlock()
+			p.match(lexer.T_RBRACE)
+			break
 		}
 	}
 
-	return &IfNode{Condition: cond, ThenBranch: thenBranch, ElseBranch: elseBranch}, nil
+	return node
 }
 
-// Regra: WhileStmt -> "while" "(" Expression ")" "{" Statement* "}"
-func (p *Parser) parseWhileStmt() (ASTNode, error) {
-	if err := p.match(scanner.T_WHILE); err != nil {
-		return nil, err
+// ─── ForStmt ───────────────────────────────────────────────────────
+// Go usa "for" onde outras linguagens usam "while".
+// Forma: for (cond) { ... }   — parênteses opcionais (professor usa).
+
+func (p *Parser) parseForStmt() ASTNode {
+	p.advance() // consome "for"
+
+	hasParen := p.peek() == lexer.T_LPAREN
+	if hasParen {
+		p.advance()
 	}
-	if err := p.match(scanner.T_LPAREN); err != nil {
-		return nil, err
+	cond := p.parseExpr()
+	if hasParen {
+		p.match(lexer.T_RPAREN)
 	}
-	cond, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	if err := p.match(scanner.T_RPAREN); err != nil {
-		return nil, err
-	}
-	body, err := p.parseBlock()
-	if err != nil {
-		return nil, err
-	}
-	return &WhileNode{Condition: cond, Body: body}, nil
+
+	p.match(lexer.T_LBRACE)
+	body := p.parseBlock()
+	p.match(lexer.T_RBRACE)
+
+	return &ForNode{Condition: cond, Body: body}
 }
 
-// parseBlock lê "{" Statement* "}" e retorna a lista de nós.
-func (p *Parser) parseBlock() ([]ASTNode, error) {
-	if err := p.match(scanner.T_LBRACE); err != nil {
-		return nil, err
-	}
+// ─── Block ─────────────────────────────────────────────────────────
+
+func (p *Parser) parseBlock() []ASTNode {
 	var stmts []ASTNode
-	for p.peek() != scanner.T_RBRACE && p.peek() != scanner.T_EOF {
-		stmt, err := p.parseStatement()
-		if err != nil {
-			return nil, err
+	for p.peek() != lexer.T_RBRACE && p.peek() != lexer.T_EOF {
+		if s := p.parseStatement(); s != nil {
+			stmts = append(stmts, s)
 		}
-		stmts = append(stmts, stmt)
 	}
-	if err := p.match(scanner.T_RBRACE); err != nil {
-		return nil, err
-	}
-	return stmts, nil
+	return stmts
 }
 
 // =====================================================================
-// CASCATA DE PRECEDÊNCIA (EXPRESSÕES)
+// CASCATA DE PRECEDÊNCIA
 // =====================================================================
-// Camada 1: Expression  -> relacionais  (==, <, >)  — precedência mais baixa
-// Camada 2: SimpleExpr  -> aditivos     (+, -)
-// Camada 3: Term        -> multiplicativos (*, /)
-// Camada 4: Factor      -> unidades básicas (número, variável, parênteses)
-//
-// O parser desce a cascata, construindo os nós de maior prioridade primeiro.
+// Camada 1: parseExpr       → operadores relacionais  (menor precedência)
+// Camada 2: parseSimpleExpr → + e -
+// Camada 3: parseTerm       → * e /
+// Camada 4: parseFactor     → valores literais e variáveis (maior precedência)
 // =====================================================================
 
-// Camada 1: Expression -> SimpleExpr [ ( "==" | "<" | ">" ) SimpleExpr ]
-func (p *Parser) parseExpression() (ASTNode, error) {
-	left, err := p.parseSimpleExpr()
-	if err != nil {
-		return nil, err
-	}
-	op := p.peek()
-	if op == scanner.T_EQ || op == scanner.T_LT || op == scanner.T_GT {
-		p.advance()
-		right, err := p.parseSimpleExpr()
-		if err != nil {
-			return nil, err
-		}
-		left = &BinaryOpNode{Op: op, Left: left, Right: right}
-	}
-	return left, nil
-}
-
-// Camada 2: SimpleExpr -> Term ( ( "+" | "-" ) Term )*
-func (p *Parser) parseSimpleExpr() (ASTNode, error) {
-	left, err := p.parseTerm()
-	if err != nil {
-		return nil, err
-	}
-	for p.peek() == scanner.T_PLUS || p.peek() == scanner.T_MINUS {
-		op := p.peek()
-		p.advance()
-		right, err := p.parseTerm()
-		if err != nil {
-			return nil, err
-		}
-		left = &BinaryOpNode{Op: op, Left: left, Right: right}
-	}
-	return left, nil
-}
-
-// Camada 3: Term -> Factor ( ( "*" | "/" ) Factor )*
-func (p *Parser) parseTerm() (ASTNode, error) {
-	left, err := p.parseFactor()
-	if err != nil {
-		return nil, err
-	}
-	for p.peek() == scanner.T_MULT || p.peek() == scanner.T_DIV {
-		op := p.peek()
-		p.advance()
-		right, err := p.parseFactor()
-		if err != nil {
-			return nil, err
-		}
-		left = &BinaryOpNode{Op: op, Left: left, Right: right}
-	}
-	return left, nil
-}
-
-// Camada 4 (Base): Factor -> NUMBER | ID | "(" Expression ")"
-func (p *Parser) parseFactor() (ASTNode, error) {
+func (p *Parser) parseExpr() ASTNode {
+	left := p.parseSimpleExpr()
 	switch p.peek() {
-	case scanner.T_NUM:
-		t := p.advance()
-		val, err := strconv.Atoi(t.Lexeme)
-		if err != nil {
-			return nil, fmt.Errorf("erro sintático na linha %d: número inválido '%s'", t.Line, t.Lexeme)
-		}
-		return &NumberNode{Value: val}, nil
+	case lexer.T_EQ, lexer.T_LT, lexer.T_GT, lexer.T_LE, lexer.T_GE:
+		op := p.peek()
+		p.advance()
+		right := p.parseSimpleExpr()
+		return &BinaryOpNode{Op: op, Left: left, Right: right}
+	}
+	return left
+}
 
-	case scanner.T_ID:
-		t := p.advance()
-		return &VariableNode{Name: t.Lexeme}, nil
+func (p *Parser) parseSimpleExpr() ASTNode {
+	left := p.parseTerm()
+	for p.peek() == lexer.T_PLUS || p.peek() == lexer.T_MINUS {
+		op := p.peek()
+		p.advance()
+		right := p.parseTerm()
+		left = &BinaryOpNode{Op: op, Left: left, Right: right}
+	}
+	return left
+}
 
-	case scanner.T_LPAREN:
-		p.advance() // consome "("
-		expr, err := p.parseExpression()
-		if err != nil {
-			return nil, err
-		}
-		if err := p.match(scanner.T_RPAREN); err != nil {
-			return nil, err
-		}
-		return expr, nil
+func (p *Parser) parseTerm() ASTNode {
+	left := p.parseFactor()
+	for p.peek() == lexer.T_MULT || p.peek() == lexer.T_DIV {
+		op := p.peek()
+		p.advance()
+		right := p.parseFactor()
+		left = &BinaryOpNode{Op: op, Left: left, Right: right}
+	}
+	return left
+}
 
+func (p *Parser) parseFactor() ASTNode {
+	tok := p.peekToken()
+	switch p.peek() {
+	case lexer.T_NUM:
+		p.advance()
+		v, _ := strconv.Atoi(tok.Lexeme)
+		return &NumberNode{Value: v}
+	case lexer.T_FLOAT_NUM:
+		p.advance()
+		v, _ := strconv.ParseFloat(tok.Lexeme, 64)
+		return &FloatNode{Value: v}
+	case lexer.T_STRING_LITERAL:
+		p.advance()
+		return &StringNode{Value: tok.Lexeme}
+	case lexer.T_TRUE:
+		p.advance()
+		return &VariableNode{Name: "true"}
+	case lexer.T_FALSE:
+		p.advance()
+		return &VariableNode{Name: "false"}
+	case lexer.T_ID:
+		p.advance()
+		return &VariableNode{Name: tok.Lexeme}
+	case lexer.T_LPAREN:
+		p.advance()
+		expr := p.parseExpr()
+		p.match(lexer.T_RPAREN)
+		return expr
 	default:
-		return nil, p.syntaxError(
-			fmt.Sprintf("fator inválido na expressão (esperava número, variável ou '('): encontrado '%s'",
-				p.peekToken().Lexeme),
-		)
+		p.sync(fmt.Sprintf("fator invalido: %q", tok.Lexeme))
+		return &NumberNode{Value: 0}
 	}
 }

@@ -27,10 +27,6 @@ const (
 	T_TRUE
 	T_FALSE
 
-	// Comandos built-in
-	T_PRINT
-	T_WHILE
-
 	// Identificadores e números
 	T_ID
 	T_NUM
@@ -64,6 +60,8 @@ const (
 	// Delimitador de instrução
 	T_SEMICOLON
 	T_COLON
+	T_DOT
+	T_COMMA
 
 	// Fim do arquivo/entrada
 	T_EOF
@@ -144,6 +142,10 @@ func (t TokenType) String() string {
 		return "T_SEMICOLON"
 	case T_COLON:
 		return "T_COLON"
+	case T_DOT:
+		return "T_DOT"
+	case T_COMMA:
+		return "T_COMMA"
 	case T_EOF:
 		return "T_EOF"
 	default:

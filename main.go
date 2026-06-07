@@ -3,212 +3,59 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
+
+	"go-compiler/lexer"
 )
 
 func main() {
-	codeTeste1 := `package main
+	code := `
+package main
 
 import "fmt"
 
 func main() {
-    var x int = 10
-    var y int = 20
-    var soma int = x + y
+	var x int = 10 // ou x := 10
 
-    z := 5
-    resultado := soma + z
+	fmt.Println(x)
 
-    var pi float = 3.14
-    area := pi * 2
+	var y int = 10
 
-    var ativo bool = true
-    inativo := false
+	if y > 5 {
+		fmt.Println(y)
+	}
 
-    var nome string = "joao"
+	var x int = 5
 
-    if (soma == 30) {
-        var dobro int = soma + soma
-    } else {
-        var metade int = soma - 5
-    }
-
-    if (x < y) {
-        diff := y - x
-    }
+	for z > 0 {
+		fmt.Println(z)
+		z = z - 1 // ou x--
+	}
 }
 `
+	scanner := lexer.NewScanner(code)
 
-	codeTeste2 := `package main
-
-import "fmt"
-
-func main() {
-    var nome string = "maria silva"
-    var vazia string = ""
-    saudacao := "ola, mundo!"
-    escapada := "ele disse \"oi\" pra mim"
-
-    /* comentario de bloco
-       com multiplas linhas
-       deve ser ignorado */
-
-    // declaracao curta de numericos
-    contador := 0
-    taxa := 1.5
-
-    for (contador < 5) {
-        contador = contador + 1
-    }
-
-    /* outro bloco antes de instrucao */
-    for (taxa < 3.0) {
-        taxa = taxa + 0.5
-    }
-
-    var limite int = 100
-    acumulado := 0
-
-    for (acumulado < limite) {
-        acumulado = acumulado + 10
-    }
-}
-`
-
-	codeTeste3 := `package main
-
-import "fmt"
-
-func main() {
-    var valor_inicial int = 0
-    var preco_total float = 99.99
-    var nome_completo string = "ana souza"
-    _contador := 1
-
-    var a int = 10 + 2
-    var b int = 10 - 3
-    var c int = a * b
-    var d int = c / 4
-
-    if (a == 12) {
-        resultado := a + b
-    }
-
-    if (b < a) {
-        diff := a - b
-    }
-
-    if (c > d) {
-        var grande int = c
-    }
-
-    var i int = 0
-    for (i < 5) {
-        i = i + 1
-        var parcial float = preco_total * i
-        if (parcial > 200) {
-            var aviso string = "limite atingido"
-        } else {
-            var ok string = "dentro do limite"
-        }
-    }
-
-    if (valor_inicial == 0) {
-        if (_contador > 0) {
-            _contador = _contador + 1
-        } else {
-            _contador = 0
-        }
-    }
-}
-`
-	// Selecione o teste desejado trocando a variável abaixo:
-	code := codeTeste1
-	_ = codeTeste2
-	_ = codeTeste3
-
-	s := scanner.New(code)
-
-	// Cabeçalho da tabela
-	fmt.Printf("%-20s %-20s %-10s\n", "TIPO DE TOKEN", "LEXEMA", "LINHA")
-	fmt.Println(repeat('-', 50))
+	// Cabeçalho da tabela formatado com espaços em branco (equivalente ao std::setw e std::left)
+	fmt.Printf("%-20s%-20s%-10s\n", "TIPO DE TOKEN", "LEXEMA", "LINHA")
+	fmt.Println(strings.Repeat("-", 50))
 
 	for {
-		tok, err := s.NextToken()
+		// Lê o token e verifica se ocorreu algum erro léxico (substitui o try/catch do C++)
+		token, err := scanner.NextToken()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Erro: %v\n", err)
 			os.Exit(1)
 		}
 
-		fmt.Printf("%-20s %-20s %-10d\n", tok.Type, tok.Lexeme, tok.Line)
+		// Imprime o token atual
+		fmt.Printf("%-20s%-20s%-10d\n", token.Type, token.Lexeme, token.Line)
 
-		if tok.Type == scanner.T_EOF {
+		// Verifica se chegou ao fim
+		if token.Type == lexer.T_EOF {
 			break
 		}
 	}
 
-	fmt.Println(repeat('-', 50))
+	fmt.Println(strings.Repeat("-", 50))
 	fmt.Println("Fim da analise lexica.")
 }
-
-func repeat(ch rune, n int) string {
-	buf := make([]rune, n)
-	for i := range buf {
-		buf[i] = ch
-	}
-	return string(buf)
-}
-
-/*
-func main() {
-	// Código-fonte escrito na linguagem MicroC.
-	code := `
-        int soma = 10 + 20;
-
-        if (soma == 30) {
-            print(soma);
-        }
-
-        while (soma > 0) {
-            soma = soma - 1;
-        }
-    `
-
-	// ── FASE 1: ANÁLISE LÉXICA ────────────────────────────────────────
-	fmt.Println("=== FASE 1: INICIANDO ANALISE LEXICA (SCANNER) ===")
-
-	s := scanner.New(code)
-	tokens, err := s.Tokenize()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Erro durante a fase de Scanner: %v\n", err)
-		os.Exit(1)
-	}
-
-	for _, tok := range tokens {
-		if tok.Type != scanner.T_EOF {
-			fmt.Printf("%s -> \"%s\" (linha %d)\n", tok.Type, tok.Lexeme, tok.Line)
-		}
-	}
-	fmt.Println("Analise lexica realizada com sucesso!\n")
-
-	// ── FASE 2: ANÁLISE SINTÁTICA ─────────────────────────────────────
-	fmt.Println("=== FASE 2: INICIANDO ANALISE SINTATICA (PARSER) ===")
-
-	parser := NewParser(tokens)
-	programAST, err := parser.ParseProgram()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "FALHA NA COMPILACAO!")
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
-	fmt.Println("Sucesso! A sequencia de tokens forma um programa estruturalmente valido para o MicroC.\n")
-
-	// ── FASE 3: IMPRESSÃO DA AST ──────────────────────────────────────
-	fmt.Println("=== FASE 3: EXIBICAO DA ARVORE SINTATICA ABSTRATA (AST) ===")
-	programAST.Print(0)
-	fmt.Println("==========================================================")
-
-	// Nota: não há delete em Go — o GC desaloca a árvore automaticamente.
-	fmt.Println("\nMemoria da AST sera desalocada automaticamente pelo Garbage Collector.")
-}
-*/

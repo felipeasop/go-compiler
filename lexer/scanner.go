@@ -32,8 +32,8 @@ type Scanner struct {
 	line  int    // Linha atual da análise
 }
 
-// New inicializa um novo Scanner para o código-fonte fornecido.
-func New(source string) *Scanner {
+// NewScanner inicializa um novo Scanner para o código-fonte fornecido.
+func NewScanner(source string) *Scanner {
 	return &Scanner{
 		input: []rune(source),
 		pos:   0,
@@ -270,9 +270,19 @@ func (s *Scanner) NextToken() (Token, error) {
 		return Token{T_ASSIGN, "=", s.line}, nil
 
 	case '<':
+		// Verifica se é "<=" (menor ou igual)
+		if s.peek() == '=' {
+			s.next()
+			return Token{T_LE, "<=", s.line}, nil
+		}
 		return Token{T_LT, "<", s.line}, nil
 
 	case '>':
+		// Verifica se é ">=" (maior ou igual)
+		if s.peek() == '=' {
+			s.next()
+			return Token{T_GE, ">=", s.line}, nil
+		}
 		return Token{T_GT, ">", s.line}, nil
 
 	case '(':
@@ -289,6 +299,12 @@ func (s *Scanner) NextToken() (Token, error) {
 
 	case ';':
 		return Token{T_SEMICOLON, ";", s.line}, nil
+
+	case '.':
+		return Token{T_DOT, ".", s.line}, nil
+
+	case ',':
+		return Token{T_COMMA, ",", s.line}, nil
 
 	case ':':
 		if s.peek() == '=' {
