@@ -1,4 +1,4 @@
-package lexer
+package parser
 
 import (
 	"fmt"
@@ -191,26 +191,10 @@ func (p *Parser) parseAssignment() ASTNode {
 
 // ─── PrintStmt ─────────────────────────────────────────────────────
 // fmt.Println(expr);
-// O scanner emite:  lexer.T_ID("fmt")  lexer.T_COLON(":") — não, "." não é token.
-// Na verdade o scanner não tem token para ".".
-// Vamos consumir "fmt" lexer.T_ID, depois o "." como erro silencioso
-// lendo o próximo char, depois "Println" lexer.T_ID.
-
 func (p *Parser) parsePrintStmt() ASTNode {
-	p.advance() // consome "fmt"  (lexer.T_ID)
-
-	// O scanner não tokeniza "." — ele vai gerar um erro léxico.
-	// Por isso aceitamos também a forma simples: Println(expr);
-	// Se o próximo for lexer.T_ID "Println", já está bom.
-	// Se vier lexer.T_COLON é porque o scanner leu ":" de algum jeito — avança.
-	if p.peek() == lexer.T_COLON {
-		p.advance() // consome ":"  (parte do "." que o scanner pode gerar como erro)
-	}
-
-	// consome "Println"
-	if p.peek() == lexer.T_ID {
-		p.advance()
-	}
+	p.match(lexer.T_ID)  // Consome "fmt"
+	p.match(lexer.T_DOT) // Consome "." (Agora tratado corretamente!)
+	p.match(lexer.T_ID)  // Consome "Println"
 
 	if _, err := p.match(lexer.T_LPAREN); err != nil {
 		return nil
@@ -220,6 +204,7 @@ func (p *Parser) parsePrintStmt() ASTNode {
 		return nil
 	}
 	p.match(lexer.T_SEMICOLON)
+
 	return &PrintCallNode{Expr: expr}
 }
 
