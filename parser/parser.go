@@ -2,6 +2,8 @@ package parser
 
 import (
 	"fmt"
+
+	"go-compiler/ast"
 	"go-compiler/lexer"
 )
 
@@ -107,8 +109,8 @@ func (p *Parser) skipSemicolons() {
 
 // ─── Program ───────────────────────────────────────────────────────
 
-func (p *Parser) ParseProgram() *ProgramNode {
-	prog := &ProgramNode{}
+func (p *Parser) ParseProgram() *ast.ProgramNode {
+	prog := &ast.ProgramNode{}
 
 	p.skipSemicolons()
 
@@ -173,7 +175,7 @@ func (p *Parser) ParseProgram() *ProgramNode {
 
 // ─── FuncDecl ──────────────────────────────────────────────────────
 
-func (p *Parser) parseFunc() ASTNode {
+func (p *Parser) parseFunc() ast.ASTNode {
 	p.advance() // consome 'func'
 
 	id, err := p.match(lexer.IDENT)
@@ -202,7 +204,7 @@ func (p *Parser) parseFunc() ASTNode {
 	p.match(lexer.RBRACE)
 	p.match(lexer.SEMICOLON)
 
-	return &FuncNode{Name: id.Lexeme, Body: body}
+	return &ast.FuncNode{Name: id.Lexeme, Body: body}
 }
 
 func isTypeKeyword(t lexer.Token) bool {
@@ -212,8 +214,8 @@ func isTypeKeyword(t lexer.Token) bool {
 
 // ─── Block ─────────────────────────────────────────────────────────
 
-func (p *Parser) parseBlock() []ASTNode {
-	var stmts []ASTNode
+func (p *Parser) parseBlock() []ast.ASTNode {
+	var stmts []ast.ASTNode
 	for p.peek() != lexer.RBRACE && p.peek() != lexer.EOF {
 		saved := p.pos
 		if s := p.parseStatement(); s != nil {
@@ -228,7 +230,7 @@ func (p *Parser) parseBlock() []ASTNode {
 
 // ─── Statement ─────────────────────────────────────────────────────
 
-func (p *Parser) parseStatement() ASTNode {
+func (p *Parser) parseStatement() ast.ASTNode {
 	p.skipSemicolons()
 
 	if p.peek() == lexer.RBRACE || p.peek() == lexer.EOF {
@@ -276,12 +278,12 @@ func (p *Parser) parseStatement() ASTNode {
 	case lexer.BREAK:
 		p.advance()
 		p.match(lexer.SEMICOLON)
-		return &BreakNode{}
+		return &ast.BreakNode{}
 
 	case lexer.CONTINUE:
 		p.advance()
 		p.match(lexer.SEMICOLON)
-		return &ContinueNode{}
+		return &ast.ContinueNode{}
 
 	case lexer.TYPE, lexer.STRUCT, lexer.MAP, lexer.CONST,
 		lexer.SELECT, lexer.SWITCH, lexer.DEFER, lexer.RANGE,
@@ -297,7 +299,7 @@ func (p *Parser) parseStatement() ASTNode {
 
 // ─── VarDecl ───────────────────────────────────────────────────────
 
-func (p *Parser) parseVarDecl() ASTNode {
+func (p *Parser) parseVarDecl() ast.ASTNode {
 	p.advance() // consome 'var'
 
 	id, err := p.match(lexer.IDENT)
@@ -309,39 +311,39 @@ func (p *Parser) parseVarDecl() ASTNode {
 		p.advance()
 	}
 
-	var init ASTNode
+	var init ast.ASTNode
 	if p.peek() == lexer.ASSIGN {
 		p.advance()
 		init = p.parseExpr()
 	}
 
 	p.match(lexer.SEMICOLON)
-	return &VarDeclNode{Name: id.Lexeme, Initializer: init}
+	return &ast.VarDeclNode{Name: id.Lexeme, Initializer: init}
 }
 
 // ─── ShortDecl ─────────────────────────────────────────────────────
 
-func (p *Parser) parseShortDecl() ASTNode {
+func (p *Parser) parseShortDecl() ast.ASTNode {
 	id := p.advance() // consome IDENT
 	p.advance()       // consome ':='
 	init := p.parseExpr()
 	p.match(lexer.SEMICOLON)
-	return &VarDeclNode{Name: id.Lexeme, Initializer: init}
+	return &ast.VarDeclNode{Name: id.Lexeme, Initializer: init}
 }
 
 // ─── Assignment ────────────────────────────────────────────────────
 
-func (p *Parser) parseAssignment() ASTNode {
+func (p *Parser) parseAssignment() ast.ASTNode {
 	id := p.advance() // consome IDENT
 	p.advance()       // consome '='
 	expr := p.parseExpr()
 	p.match(lexer.SEMICOLON)
-	return &AssignNode{Name: id.Lexeme, Expr: expr}
+	return &ast.AssignNode{Name: id.Lexeme, Expr: expr}
 }
 
 // ─── IncDec ────────────────────────────────────────────────────────
 
-func (p *Parser) parseIncDec() ASTNode {
+func (p *Parser) parseIncDec() ast.ASTNode {
 	id := p.advance() // consome IDENT
 	op := p.advance() // consome ++ ou --
 	p.match(lexer.SEMICOLON)
@@ -350,16 +352,18 @@ func (p *Parser) parseIncDec() ASTNode {
 	if op.Type == lexer.DEC {
 		opStr = "-"
 	}
-	return &AssignNode{
+	return &ast.AssignNode{
 		Name: id.Lexeme,
-		Expr: &BinaryOpNode{OpStr: opStr, Left: &VariableNode{Name: id.Lexeme}, Right: &LiteralNode{Value: "1"}},
+		Expr: &ast.BinaryOpNode{OpStr: opStr,
+			Left:  &ast.VariableNode{Name: id.Lexeme},
+			Right: &ast.LiteralNode{Value: "1"}},
 	}
 }
 
 // ─── FuncCall ──────────────────────────────────────────────────────
 // CORRIGIDO: Avanço incondicional para evitar loop infinito silencioso
 
-func (p *Parser) parseFuncCall() ASTNode {
+func (p *Parser) parseFuncCall() ast.ASTNode {
 	id := p.advance() // consome IDENT
 	p.advance()       // consome '('
 	depth := 1
@@ -373,12 +377,12 @@ func (p *Parser) parseFuncCall() ASTNode {
 	}
 	// Não chamamos p.match(lexer.RPAREN) porque o advance() já o engoliu.
 	p.match(lexer.SEMICOLON)
-	return &VariableNode{Name: id.Lexeme + "(...)"}
+	return &ast.VariableNode{Name: id.Lexeme + "(...)"}
 }
 
 // ─── PrintStmt ─────────────────────────────────────────────────────
 
-func (p *Parser) parsePrintStmt() ASTNode {
+func (p *Parser) parsePrintStmt() ast.ASTNode {
 	p.advance()           // consome 'fmt'
 	p.match(lexer.PERIOD) // consome '.'
 	p.match(lexer.IDENT)  // consome 'Println'
@@ -386,16 +390,16 @@ func (p *Parser) parsePrintStmt() ASTNode {
 	expr := p.parseExpr()
 	p.match(lexer.RPAREN)
 	p.match(lexer.SEMICOLON)
-	return &PrintCallNode{Expr: expr}
+	return &ast.PrintCallNode{Expr: expr}
 }
 
 // ─── IfStmt ────────────────────────────────────────────────────────
 
-func (p *Parser) parseIf() ASTNode {
+func (p *Parser) parseIf() ast.ASTNode {
 	p.advance() // consome 'if'
 
-	var init ASTNode
-	var cond ASTNode
+	var init ast.ASTNode
+	var cond ast.ASTNode
 
 	// Tenta ler a primeira parte (pode ser a inicialização ou já a condição)
 	firstPt := p.parseSimpleStmt()
@@ -416,7 +420,7 @@ func (p *Parser) parseIf() ASTNode {
 	thenBranch := p.parseBlock()
 	p.match(lexer.RBRACE)
 
-	var elseBranch []ASTNode
+	var elseBranch []ast.ASTNode
 	if p.peek() == lexer.ELSE {
 		p.advance() // consome 'else'
 		if p.peek() == lexer.IF {
@@ -433,19 +437,19 @@ func (p *Parser) parseIf() ASTNode {
 	}
 
 	// Retorna o nó montado
-	return &IfNode{Init: init, Condition: cond, ThenBranch: thenBranch, ElseBranch: elseBranch}
+	return &ast.IfNode{Init: init, Condition: cond, ThenBranch: thenBranch, ElseBranch: elseBranch}
 }
 
 // ─── ForStmt ───────────────────────────────────────────────────────
 
-func (p *Parser) parseFor() ASTNode {
+func (p *Parser) parseFor() ast.ASTNode {
 	p.advance() // consome 'for'
 
 	if p.peek() == lexer.LBRACE {
 		p.advance()
 		body := p.parseBlock()
 		p.match(lexer.RBRACE)
-		return &ForNode{Condition: nil, Body: body}
+		return &ast.ForNode{Condition: nil, Body: body}
 	}
 
 	isClassic := false
@@ -460,17 +464,17 @@ func (p *Parser) parseFor() ASTNode {
 		}
 	}
 
-	node := &ForNode{}
+	node := &ast.ForNode{}
 
 	if isClassic {
 		init := p.parseSimpleStmt()
-		node.Body = append([]ASTNode{}, init)
+		node.Body = append([]ast.ASTNode{}, init)
 		p.match(lexer.SEMICOLON)
 		if p.peek() != lexer.SEMICOLON {
 			node.Condition = p.parseExpr()
 		}
 		p.match(lexer.SEMICOLON)
-		var post ASTNode
+		var post ast.ASTNode
 		if p.peek() != lexer.LBRACE {
 			post = p.parseSimpleStmt()
 		}
@@ -478,7 +482,7 @@ func (p *Parser) parseFor() ASTNode {
 		body := p.parseBlock()
 		p.match(lexer.RBRACE)
 
-		full := []ASTNode{init}
+		full := []ast.ASTNode{init}
 		full = append(full, body...)
 		if post != nil {
 			full = append(full, post)
@@ -494,19 +498,19 @@ func (p *Parser) parseFor() ASTNode {
 	return node
 }
 
-func (p *Parser) parseSimpleStmt() ASTNode {
+func (p *Parser) parseSimpleStmt() ast.ASTNode {
 	if p.peek() == lexer.IDENT {
 		if p.lookahead(1) == lexer.DEFINE {
 			id := p.advance()
 			p.advance()
 			expr := p.parseExpr()
-			return &VarDeclNode{Name: id.Lexeme, Initializer: expr}
+			return &ast.VarDeclNode{Name: id.Lexeme, Initializer: expr}
 		}
 		if p.lookahead(1) == lexer.ASSIGN {
 			id := p.advance()
 			p.advance()
 			expr := p.parseExpr()
-			return &AssignNode{Name: id.Lexeme, Expr: expr}
+			return &ast.AssignNode{Name: id.Lexeme, Expr: expr}
 		}
 		if p.lookahead(1) == lexer.INC || p.lookahead(1) == lexer.DEC {
 			id := p.advance()
@@ -515,26 +519,28 @@ func (p *Parser) parseSimpleStmt() ASTNode {
 			if op.Type == lexer.DEC {
 				opStr = "-"
 			}
-			return &AssignNode{
+			return &ast.AssignNode{
 				Name: id.Lexeme,
-				Expr: &BinaryOpNode{OpStr: opStr, Left: &VariableNode{Name: id.Lexeme}, Right: &LiteralNode{Value: "1"}},
+				Expr: &ast.BinaryOpNode{OpStr: opStr,
+					Left:  &ast.VariableNode{Name: id.Lexeme},
+					Right: &ast.LiteralNode{Value: "1"}},
 			}
 		}
 	}
 	return p.parseExpr()
 }
 
-func (p *Parser) parseReturn() ASTNode {
+func (p *Parser) parseReturn() ast.ASTNode {
 	p.advance()
 
 	if p.peek() == lexer.SEMICOLON || p.peek() == lexer.RBRACE || p.peek() == lexer.EOF {
 		p.match(lexer.SEMICOLON)
-		return &ReturnNode{Value: nil}
+		return &ast.ReturnNode{Value: nil}
 	}
 
 	val := p.parseExpr()
 	p.match(lexer.SEMICOLON)
-	return &ReturnNode{Value: val}
+	return &ast.ReturnNode{Value: val}
 }
 
 // =====================================================================
@@ -542,81 +548,83 @@ func (p *Parser) parseReturn() ASTNode {
 // =====================================================================
 
 // Camada 1: Operadores Lógicos (&&, ||)
-func (p *Parser) parseExpr() ASTNode {
+func (p *Parser) parseExpr() ast.ASTNode {
 	return p.parseLogicalExpr()
 }
 
-func (p *Parser) parseLogicalExpr() ASTNode {
+func (p *Parser) parseLogicalExpr() ast.ASTNode {
 	left := p.parseRelationalExpr()
 	// Agora ele reconhece && e ||
 	for p.peek() == lexer.LAND || p.peek() == lexer.LOR {
 		op := p.advance()
 		right := p.parseRelationalExpr()
-		left = &BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right}
+		left = &ast.BinaryOpNode{OpStr: op.Lexeme,
+			Left:  left,
+			Right: right}
 	}
 	return left
 }
 
 // Camada 2: Operadores Relacionais (==, !=, <, >, <=, >=)
-func (p *Parser) parseRelationalExpr() ASTNode {
+func (p *Parser) parseRelationalExpr() ast.ASTNode {
 	left := p.parseSimpleExpr()
 	switch p.peek() {
 	case lexer.EQL, lexer.NEQ, lexer.LSS, lexer.GTR, lexer.LEQ, lexer.GEQ:
 		op := p.advance()
 		right := p.parseSimpleExpr()
-		return &BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right}
+		return &ast.BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right}
 	}
 	return left
 }
 
 // Camada 3: Soma e Subtração
-func (p *Parser) parseSimpleExpr() ASTNode {
+func (p *Parser) parseSimpleExpr() ast.ASTNode {
 	left := p.parseTerm()
 	for p.peek() == lexer.ADD || p.peek() == lexer.SUB {
 		op := p.advance()
 		right := p.parseTerm()
-		left = &BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right}
+		left = &ast.BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right}
 	}
 	return left
 }
 
 // Camada 4: Multiplicação, Divisão e Resto
-func (p *Parser) parseTerm() ASTNode {
+func (p *Parser) parseTerm() ast.ASTNode {
 	left := p.parseUnary()
 	for p.peek() == lexer.MUL || p.peek() == lexer.QUO || p.peek() == lexer.REM {
 		op := p.advance()
 		right := p.parseUnary()
-		left = &BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right}
+		left = &ast.BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right}
 	}
 	return left
 }
 
 // Camada 5: Unários (Negação Lógica e Numérica)
-func (p *Parser) parseUnary() ASTNode {
+func (p *Parser) parseUnary() ast.ASTNode {
 	switch p.peek() {
 	case lexer.NOT: // O operador '!' agora cai perfeitamente aqui
 		op := p.advance()
-		return &UnaryOpNode{OpStr: op.Lexeme, Operand: p.parseUnary()}
+		return &ast.UnaryOpNode{OpStr: op.Lexeme, Operand: p.parseUnary()}
 	case lexer.SUB:
 		op := p.advance()
-		return &UnaryOpNode{OpStr: op.Lexeme, Operand: p.parseUnary()}
+		return &ast.UnaryOpNode{OpStr: op.Lexeme, Operand: p.parseUnary()}
 	}
 	return p.parseFactor()
 }
 
 // Camada 6: Literais, Variáveis e Parênteses
-func (p *Parser) parseFactor() ASTNode {
+func (p *Parser) parseFactor() ast.ASTNode {
 	tok := p.peekToken()
 
 	switch p.peek() {
 	case lexer.INT, lexer.FLOAT, lexer.STRING, lexer.IMAG, lexer.CHAR:
 		p.advance()
-		return &LiteralNode{Value: tok.Lexeme}
+		return &ast.LiteralNode{Value: tok.Lexeme}
 
 	case lexer.IDENT:
 		if tok.Lexeme == "true" || tok.Lexeme == "false" {
 			p.advance()
-			return &LiteralNode{Value: tok.Lexeme}
+			return &ast.LiteralNode{Value: tok.Lexeme}
 		}
 		p.advance()
 		if p.peek() == lexer.LPAREN {
@@ -630,9 +638,9 @@ func (p *Parser) parseFactor() ASTNode {
 					depth--
 				}
 			}
-			return &VariableNode{Name: tok.Lexeme + "(...)"}
+			return &ast.VariableNode{Name: tok.Lexeme + "(...)"}
 		}
-		return &VariableNode{Name: tok.Lexeme}
+		return &ast.VariableNode{Name: tok.Lexeme}
 
 	case lexer.LPAREN:
 		p.advance()
@@ -642,6 +650,6 @@ func (p *Parser) parseFactor() ASTNode {
 
 	default:
 		p.syncError(fmt.Sprintf("fator invalido: %q", tok.Lexeme))
-		return &LiteralNode{Value: "0"}
+		return &ast.LiteralNode{Value: "0"}
 	}
 }
