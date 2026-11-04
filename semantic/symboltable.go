@@ -1,6 +1,9 @@
 package semantic
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // =====================================================================
 // TABELA DE SÍMBOLOS
@@ -10,6 +13,9 @@ import "fmt"
 // um novo escopo; ao sair, desempilhamos. A busca de símbolo percorre a
 // pilha de dentro para fora, permitindo shadowing (variável interna
 // "esconder" uma externa de mesmo nome), como o Go permite.
+//
+// As funções ficam em uma tabela à parte (SemanticAnalyzer.funcs), pois
+// são todas registradas antes da análise dos corpos.
 // =====================================================================
 
 // SymbolType representa o tipo inferido/declarado de um símbolo.
@@ -21,6 +27,7 @@ const (
 	TypeFloat
 	TypeString
 	TypeBool
+	TypeVoid // "tipo" de retorno de funções sem valor
 )
 
 func (t SymbolType) String() string {
@@ -28,20 +35,48 @@ func (t SymbolType) String() string {
 	case TypeInt:
 		return "int"
 	case TypeFloat:
-		return "float"
+		return "float64"
 	case TypeString:
 		return "string"
 	case TypeBool:
 		return "bool"
+	case TypeVoid:
+		return "void"
 	default:
 		return "desconhecido"
 	}
 }
 
+// TypeFromName converte o nome de um tipo do código-fonte em SymbolType.
+func TypeFromName(name string) (SymbolType, bool) {
+	switch name {
+	case "int":
+		return TypeInt, true
+	case "float64", "float32":
+		return TypeFloat, true
+	case "string":
+		return TypeString, true
+	case "bool":
+		return TypeBool, true
+	}
+	return TypeUnknown, false
+}
+
+// SymbolKind classifica o que um símbolo representa.
+type SymbolKind string
+
+const (
+	KindVar   SymbolKind = "variável"
+	KindParam SymbolKind = "parâmetro"
+	KindFunc  SymbolKind = "função"
+)
+
 // Symbol representa uma entrada na Tabela de Símbolos.
 type Symbol struct {
-	Name        string     // nome da variável
-	Type        SymbolType // tipo da variável
+	Name        string     // nome do identificador
+	Kind        SymbolKind // variável, parâmetro ou função
+	Type        SymbolType // tipo da variável (ou de retorno, para funções)
+	Signature   string     // assinatura completa (apenas funções)
 	Scope       int        // nível do escopo em que foi declarada (0 = global)
 	DeclLine    int        // linha de declaração
 	Initialized bool       // se já recebeu algum valor
@@ -89,6 +124,7 @@ func (st *SymbolTable) Declare(name string, typ SymbolType, line int, initialize
 	}
 	current[name] = &Symbol{
 		Name:        name,
+		Kind:        KindVar,
 		Type:        typ,
 		Scope:       st.currentScopeLevel(),
 		DeclLine:    line,
@@ -109,7 +145,8 @@ func (st *SymbolTable) Lookup(name string) (*Symbol, bool) {
 }
 
 // AllSymbolsInScope retorna todos os símbolos de um nível de escopo
-// específico — usado ao fechar o escopo para checar variáveis não usadas.
+// específico, ordenados pela linha de declaração — usado ao fechar o
+// escopo para checar variáveis não usadas.
 func (st *SymbolTable) AllSymbolsInScope(level int) []*Symbol {
 	if level < 0 || level >= len(st.scopes) {
 		return nil
@@ -118,5 +155,6 @@ func (st *SymbolTable) AllSymbolsInScope(level int) []*Symbol {
 	for _, sym := range st.scopes[level] {
 		out = append(out, sym)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].DeclLine < out[j].DeclLine })
 	return out
 }

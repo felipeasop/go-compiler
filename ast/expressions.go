@@ -2,6 +2,7 @@ package ast
 
 import (
 	"fmt"
+	"strings"
 )
 
 // ─── BinaryOpNode ──────────────────────────────────────────────────
@@ -9,6 +10,7 @@ type BinaryOpNode struct {
 	OpStr string
 	Left  ASTNode
 	Right ASTNode
+	Line  int
 }
 
 func (n *BinaryOpNode) Print(indent int) {
@@ -30,6 +32,7 @@ func (n *BinaryOpNode) ToJSON(indent int) string {
 type UnaryOpNode struct {
 	OpStr   string
 	Operand ASTNode
+	Line    int
 }
 
 func (n *UnaryOpNode) Print(indent int) {
@@ -47,6 +50,7 @@ func (n *UnaryOpNode) ToJSON(indent int) string {
 // Cobre INT, FLOAT, STRING, IMAG, CHAR, true, false
 type LiteralNode struct {
 	Value string
+	Line  int
 }
 
 func (n *LiteralNode) Print(indent int) {
@@ -67,4 +71,29 @@ func (n *VariableNode) Print(indent int) {
 }
 func (n *VariableNode) ToJSON(indent int) string {
 	return fmt.Sprintf("%s{\"tipo\": \"VariableNode\", \"nome\": %q}", jpd(indent), n.Name)
+}
+
+// ─── CallNode ──────────────────────────────────────────────────────
+// Chamada de função: nome(arg1, arg2, ...). Também representa as
+// conversões de tipo int(x) e float64(x), que em Go têm a mesma sintaxe.
+type CallNode struct {
+	Name string
+	Args []ASTNode
+	Line int
+}
+
+func (n *CallNode) Print(indent int) {
+	fmt.Printf("%sCallNode (%s)\n", pad(indent), n.Name)
+	for _, a := range n.Args {
+		a.Print(indent + 4)
+	}
+}
+
+func (n *CallNode) ToJSON(indent int) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%s{\n%s\"tipo\": \"CallNode\",\n%s\"nome\": %q,\n%s\"args\": [\n",
+		jpd(indent), jpd(indent+1), jpd(indent+1), n.Name, jpd(indent+1)))
+	writeJSONList(&sb, n.Args, indent+2)
+	sb.WriteString(fmt.Sprintf("%s]\n%s}", jpd(indent+1), jpd(indent)))
+	return sb.String()
 }

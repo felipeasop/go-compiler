@@ -113,7 +113,7 @@ func (r *Report) String() string {
 	return sb.String()
 }
 
-// SymbolsToJSON exporta a Tabela de Símbolos em formato JSON (melhoria obrigatória).
+// SymbolsToJSON exporta a Tabela de Símbolos em formato JSON.
 func SymbolsToJSON(symbols []*Symbol, indent int) string {
 	pad := strings.Repeat("  ", indent)
 	pad1 := strings.Repeat("  ", indent+1)
@@ -121,13 +121,28 @@ func SymbolsToJSON(symbols []*Symbol, indent int) string {
 	sb.WriteString("[\n")
 	for i, s := range symbols {
 		sb.WriteString(fmt.Sprintf(
-			"%s{\"nome\": %q, \"tipo\": %q, \"escopo\": %d, \"linha\": %d, \"inicializada\": %t, \"utilizada\": %t}",
-			pad1, s.Name, s.Type.String(), s.Scope, s.DeclLine, s.Initialized, s.Used))
+			"%s{\"nome\": %q, \"categoria\": %q, \"tipo\": %q, \"assinatura\": %q, \"escopo\": %d, \"linha\": %d, \"inicializada\": %t, \"utilizada\": %t}",
+			pad1, s.Name, s.Kind, s.Type.String(), s.Signature, s.Scope, s.DeclLine, s.Initialized, s.Used))
 		if i < len(symbols)-1 {
 			sb.WriteString(",")
 		}
 		sb.WriteString("\n")
 	}
 	sb.WriteString(pad + "]")
+	return sb.String()
+}
+
+// SymbolsTable formata a Tabela de Símbolos como tabela de texto para o terminal.
+func SymbolsTable(symbols []*Symbol) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%-14s %-11s %-28s %-7s %s\n", "NOME", "CATEGORIA", "TIPO", "ESCOPO", "LINHA"))
+	sb.WriteString(strings.Repeat("-", 70) + "\n")
+	for _, s := range symbols {
+		typ := s.Type.String()
+		if s.Kind == KindFunc {
+			typ = s.Signature
+		}
+		sb.WriteString(fmt.Sprintf("%-14s %-11s %-28s %-7d %d\n", s.Name, s.Kind, typ, s.Scope, s.DeclLine))
+	}
 	return sb.String()
 }

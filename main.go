@@ -29,9 +29,11 @@ func main() {
 
 	fmt.Printf("=== INICIANDO ANÁLISE LÉXICA DO ARQUIVO: %s ===\n", filePath)
 	scanner := lexer.NewScanner(string(data))
-	tokens, err := scanner.Tokenize()
-	if err != nil {
-		fmt.Printf("Erro lexico fatal: %v\n", err)
+	tokens, lexErrs := scanner.Tokenize()
+	if len(lexErrs) > 0 {
+		for _, e := range lexErrs {
+			fmt.Println(e)
+		}
 		os.Exit(1)
 	}
 

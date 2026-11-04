@@ -10,18 +10,25 @@ import (
 // =====================================================================
 // PARSER DESCENDENTE RECURSIVO
 // =====================================================================
-// Gramática:
-//   Program      → "package" IDENT { Import } { FuncDecl | VarDecl }
-//   FuncDecl     → "func" IDENT "(" ")" "{" Statement* "}"
-//   Statement    → VarDecl | ShortDecl | Assignment | PrintStmt
-//                | IfStmt | ForStmt | ReturnStmt | BreakStmt | ContinueStmt
-//   Expr         → LogicalExpr
-//   LogicalExpr  → RelationalExpr ( ( "&&" | "||" ) RelationalExpr )*
-//   RelExpr      → SimpleExpr [ ( "==" | "!=" | "<" | ">" | "<=" | ">=" ) SimpleExpr ]
+// Gramática (EBNF completa em docs/gramatica.md):
+//   Program      → "package" IDENT ";" { Import } { FuncDecl | VarDecl }
+//   FuncDecl     → "func" IDENT "(" [ ParamList ] ")" [ Type ] Block
+//   ParamList    → ParamGroup { "," ParamGroup }
+//   ParamGroup   → IDENT { "," IDENT } Type
+//   Block        → "{" { Statement } "}"
+//   Statement    → VarDecl | SimpleStmt ";" | PrintStmt | IfStmt | ForStmt
+//                | ReturnStmt | "break" | "continue"
+//   SimpleStmt   → IDENT ":=" Expr | IDENT AssignOp Expr | IDENT ("++"|"--")
+//                | CallExpr
+//   Expr         → OrExpr
+//   OrExpr       → AndExpr ( "||" AndExpr )*
+//   AndExpr      → RelationalExpr ( "&&" RelationalExpr )*
+//   RelExpr      → SimpleExpr ( ( "==" | "!=" | "<" | ">" | "<=" | ">=" ) SimpleExpr )*
 //   SimpleExpr   → Term ( ( "+" | "-" ) Term )*
 //   Term         → Unary ( ( "*" | "/" | "%" ) Unary )*
-//   Unary        → [ "!" | "-" ] Factor
-//   Factor       → LITERAL | IDENT | "(" Expr ")"
+//   Unary        → [ "!" | "-" ] Unary | Factor
+//   Factor       → LITERAL | IDENT | CallExpr | "(" Expr ")"
+//   CallExpr     → IDENT "(" [ Expr { "," Expr } ] ")"
 // =====================================================================
 
 type Parser struct {
@@ -73,23 +80,26 @@ func (p *Parser) advance() lexer.TokenData {
 	return tok
 }
 
+// errorf registra um erro sintático na linha do token atual.
+func (p *Parser) errorf(format string, args ...interface{}) error {
+	tok := p.peekToken()
+	err := fmt.Errorf("erro sintatico linha %d: %s", tok.Line, fmt.Sprintf(format, args...))
+	p.errors = append(p.errors, err)
+	return err
+}
+
 // match consome o token se for do tipo esperado; registra erro caso contrário.
 func (p *Parser) match(expected lexer.Token) (lexer.TokenData, error) {
 	if p.peek() == expected {
 		return p.advance(), nil
 	}
 	tok := p.peekToken()
-	err := fmt.Errorf("erro sintatico linha %d: esperava %s, encontrou %s (%q)",
-		tok.Line, expected, tok.Type, tok.Lexeme)
-	p.errors = append(p.errors, err)
-	return lexer.TokenData{}, err
+	return lexer.TokenData{}, p.errorf("esperava %s, encontrou %s (%q)", expected, tok.Type, tok.Lexeme)
 }
 
 // syncError registra erro e aplica Panic Mode: avança até ponto seguro.
 func (p *Parser) syncError(msg string) {
-	tok := p.peekToken()
-	p.errors = append(p.errors, fmt.Errorf("erro sintatico linha %d: %s (encontrou %q)",
-		tok.Line, msg, tok.Lexeme))
+	p.errorf("%s (encontrou %q)", msg, p.peekLexeme())
 	for p.peek() != lexer.EOF &&
 		p.peek() != lexer.SEMICOLON &&
 		p.peek() != lexer.RBRACE {
@@ -104,6 +114,18 @@ func (p *Parser) syncError(msg string) {
 func (p *Parser) skipSemicolons() {
 	for p.peek() == lexer.SEMICOLON {
 		p.advance()
+	}
+}
+
+// endStatement exige o fim de uma instrução: ';' (explícito ou inserido
+// pelo lexer) ou um '}' que fecha o bloco na mesma linha.
+func (p *Parser) endStatement() {
+	switch p.peek() {
+	case lexer.SEMICOLON:
+		p.advance()
+	case lexer.RBRACE, lexer.EOF: // EOF inesperado já é reportado por quem esperava '}'
+	default:
+		p.syncError("fim de instrucao esperado (faltou quebra de linha ou ';')")
 	}
 }
 
@@ -128,6 +150,7 @@ func (p *Parser) ParseProgram() *ast.ProgramNode {
 		p.advance()
 		if p.peek() == lexer.LPAREN {
 			p.advance()
+			p.skipSemicolons()
 			for p.peek() == lexer.STRING {
 				imp := p.advance()
 				prog.Imports = append(prog.Imports, imp.Lexeme)
@@ -180,36 +203,69 @@ func (p *Parser) parseFunc() ast.ASTNode {
 
 	id, err := p.match(lexer.IDENT)
 	if err != nil {
+		p.syncError("nome de funcao esperado")
+		return nil
+	}
+	fn := &ast.FuncNode{Name: id.Lexeme, Line: id.Line}
+
+	if _, err := p.match(lexer.LPAREN); err != nil {
+		p.syncError("'(' esperado apos o nome da funcao")
+		return nil
+	}
+	fn.Params = p.parseParams()
+	if _, err := p.match(lexer.RPAREN); err != nil {
+		p.syncError("')' esperado ao fim dos parametros")
 		return nil
 	}
 
-	// lista de parâmetros — não parseamos tipos ainda, só consumimos
-	p.match(lexer.LPAREN)
-	for p.peek() != lexer.RPAREN && p.peek() != lexer.EOF {
-		p.advance()
-	}
-	p.match(lexer.RPAREN)
-
-	// tipo de retorno opcional (simples, sem parênteses)
-	if p.peek() == lexer.IDENT ||
-		p.peek() == lexer.MUL ||
-		isTypeKeyword(p.peek()) {
-		p.advance()
+	// tipo de retorno opcional (um único tipo nomeado)
+	if p.peek() == lexer.IDENT {
+		fn.ReturnType = p.advance().Lexeme
 	}
 
 	if _, err := p.match(lexer.LBRACE); err != nil {
+		p.syncError("'{' esperado no inicio do corpo da funcao")
 		return nil
 	}
-	body := p.parseBlock()
+	fn.Body = p.parseBlock()
 	p.match(lexer.RBRACE)
-	p.match(lexer.SEMICOLON)
+	p.endStatement()
 
-	return &ast.FuncNode{Name: id.Lexeme, Body: body}
+	return fn
 }
 
-func isTypeKeyword(t lexer.Token) bool {
-	_ = t
-	return false
+// parseParams reconhece as duas formas do Go: (a int, b int) e (a, b int).
+func (p *Parser) parseParams() []ast.Param {
+	var params []ast.Param
+	var pending []lexer.TokenData // nomes que ainda aguardam o tipo
+
+	for p.peek() == lexer.IDENT {
+		name := p.advance()
+		pending = append(pending, name)
+
+		if p.peek() == lexer.COMMA {
+			p.advance()
+			continue
+		}
+		if p.peek() == lexer.RPAREN {
+			break // reportado abaixo: parâmetro sem tipo
+		}
+		typ, err := p.match(lexer.IDENT)
+		if err != nil {
+			return params
+		}
+		for _, n := range pending {
+			params = append(params, ast.Param{Name: n.Lexeme, TypeName: typ.Lexeme, Line: n.Line})
+		}
+		pending = nil
+		if p.peek() == lexer.COMMA {
+			p.advance()
+		}
+	}
+	if len(pending) > 0 {
+		p.errorf("parametro '%s' sem tipo", pending[len(pending)-1].Lexeme)
+	}
+	return params
 }
 
 // ─── Block ─────────────────────────────────────────────────────────
@@ -243,25 +299,16 @@ func (p *Parser) parseStatement() ast.ASTNode {
 		return p.parseVarDecl()
 
 	case lexer.IDENT:
-		// fmt.Println(...)
+		// fmt.Println(...) / fmt.Print(...) / fmt.Printf(...)
 		if p.peekLexeme() == "fmt" && p.lookahead(1) == lexer.PERIOD {
 			return p.parsePrintStmt()
 		}
-		// x := expr
-		if p.lookahead(1) == lexer.DEFINE {
-			return p.parseShortDecl()
-		}
-		// x = expr
-		if p.lookahead(1) == lexer.ASSIGN {
-			return p.parseAssignment()
-		}
-		// x++ ou x--
-		if p.lookahead(1) == lexer.INC || p.lookahead(1) == lexer.DEC {
-			return p.parseIncDec()
-		}
-		// chamada de função genérica: ident(...)
-		if p.lookahead(1) == lexer.LPAREN {
-			return p.parseFuncCall()
+		if stmt := p.parseSimpleStmt(); stmt != nil {
+			if _, isCall := stmt.(*ast.CallNode); !isCall && !isAssignLike(stmt) {
+				p.errorf("expressao avaliada mas nao utilizada")
+			}
+			p.endStatement()
+			return stmt
 		}
 		p.syncError("instrucao invalida com identificador")
 		return nil
@@ -276,14 +323,14 @@ func (p *Parser) parseStatement() ast.ASTNode {
 		return p.parseReturn()
 
 	case lexer.BREAK:
-		p.advance()
-		p.match(lexer.SEMICOLON)
-		return &ast.BreakNode{}
+		tok := p.advance()
+		p.endStatement()
+		return &ast.BreakNode{Line: tok.Line}
 
 	case lexer.CONTINUE:
-		p.advance()
-		p.match(lexer.SEMICOLON)
-		return &ast.ContinueNode{}
+		tok := p.advance()
+		p.endStatement()
+		return &ast.ContinueNode{Line: tok.Line}
 
 	case lexer.TYPE, lexer.STRUCT, lexer.MAP, lexer.CONST,
 		lexer.SELECT, lexer.SWITCH, lexer.DEFER, lexer.RANGE,
@@ -297,6 +344,14 @@ func (p *Parser) parseStatement() ast.ASTNode {
 	}
 }
 
+func isAssignLike(n ast.ASTNode) bool {
+	switch n.(type) {
+	case *ast.AssignNode, *ast.VarDeclNode:
+		return true
+	}
+	return false
+}
+
 // ─── VarDecl ───────────────────────────────────────────────────────
 
 func (p *Parser) parseVarDecl() ast.ASTNode {
@@ -304,100 +359,140 @@ func (p *Parser) parseVarDecl() ast.ASTNode {
 
 	id, err := p.match(lexer.IDENT)
 	if err != nil {
+		p.syncError("nome de variavel esperado apos 'var'")
+		return nil
+	}
+	decl := &ast.VarDeclNode{Name: id.Lexeme, Line: id.Line}
+
+	if p.peek() == lexer.IDENT {
+		decl.TypeName = p.advance().Lexeme
+	}
+
+	if p.peek() == lexer.ASSIGN {
+		p.advance()
+		if p.peek() == lexer.SEMICOLON || p.peek() == lexer.RBRACE {
+			p.syncError("expressao esperada apos '='")
+			return nil
+		}
+		decl.Initializer = p.parseExpr()
+	}
+
+	if decl.TypeName == "" && decl.Initializer == nil {
+		p.syncError(fmt.Sprintf("declaracao de '%s' precisa de tipo ou valor inicial", decl.Name))
 		return nil
 	}
 
+	p.endStatement()
+	return decl
+}
+
+// ─── SimpleStmt ────────────────────────────────────────────────────
+// Usado em instruções comuns e nas cláusulas init/post de if e for.
+// Não consome o ';' final.
+
+// compoundOps mapeia operadores de atribuição composta para o operador binário.
+var compoundOps = map[lexer.Token]string{
+	lexer.ADD_ASSIGN: "+",
+	lexer.SUB_ASSIGN: "-",
+	lexer.MUL_ASSIGN: "*",
+	lexer.QUO_ASSIGN: "/",
+	lexer.REM_ASSIGN: "%",
+}
+
+func (p *Parser) parseSimpleStmt() ast.ASTNode {
 	if p.peek() == lexer.IDENT {
-		p.advance()
-	}
+		switch next := p.lookahead(1); {
+		case next == lexer.DEFINE: // x := expr
+			id := p.advance()
+			p.advance()
+			expr := p.parseExpr()
+			return &ast.VarDeclNode{Name: id.Lexeme, Initializer: expr, Line: id.Line}
 
-	var init ast.ASTNode
-	if p.peek() == lexer.ASSIGN {
-		p.advance()
-		init = p.parseExpr()
-	}
+		case next == lexer.ASSIGN: // x = expr
+			id := p.advance()
+			p.advance()
+			expr := p.parseExpr()
+			return &ast.AssignNode{Name: id.Lexeme, Expr: expr, Line: id.Line}
 
-	p.match(lexer.SEMICOLON)
-	return &ast.VarDeclNode{Name: id.Lexeme, Initializer: init, Line: id.Line}
-}
+		case compoundOps[next] != "": // x += expr  →  x = x + expr
+			id := p.advance()
+			op := compoundOps[p.advance().Type]
+			expr := p.parseExpr()
+			return &ast.AssignNode{
+				Name: id.Lexeme,
+				Expr: &ast.BinaryOpNode{OpStr: op,
+					Left:  &ast.VariableNode{Name: id.Lexeme, Line: id.Line},
+					Right: expr, Line: id.Line},
+				Line: id.Line,
+			}
 
-// ─── ShortDecl ─────────────────────────────────────────────────────
-
-func (p *Parser) parseShortDecl() ast.ASTNode {
-	id := p.advance() // consome IDENT
-	p.advance()       // consome ':='
-	init := p.parseExpr()
-	p.match(lexer.SEMICOLON)
-	return &ast.VarDeclNode{Name: id.Lexeme, Initializer: init, Line: id.Line}
-}
-
-// ─── Assignment ────────────────────────────────────────────────────
-
-func (p *Parser) parseAssignment() ast.ASTNode {
-	id := p.advance() // consome IDENT
-	p.advance()       // consome '='
-	expr := p.parseExpr()
-	p.match(lexer.SEMICOLON)
-	return &ast.AssignNode{Name: id.Lexeme, Expr: expr, Line: id.Line}
-}
-
-// ─── IncDec ────────────────────────────────────────────────────────
-
-func (p *Parser) parseIncDec() ast.ASTNode {
-	id := p.advance() // consome IDENT
-	op := p.advance() // consome ++ ou --
-	p.match(lexer.SEMICOLON)
-
-	opStr := "+"
-	if op.Type == lexer.DEC {
-		opStr = "-"
-	}
-	return &ast.AssignNode{
-		Name: id.Lexeme,
-		Expr: &ast.BinaryOpNode{OpStr: opStr,
-			Left:  &ast.VariableNode{Name: id.Lexeme, Line: id.Line},
-			Right: &ast.LiteralNode{Value: "1"}},
-		Line: id.Line,
-	}
-}
-
-// ─── FuncCall ──────────────────────────────────────────────────────
-// CORRIGIDO: Avanço incondicional para evitar loop infinito silencioso
-
-func (p *Parser) parseFuncCall() ast.ASTNode {
-	id := p.advance() // consome IDENT
-	p.advance()       // consome '('
-	depth := 1
-	for depth > 0 && p.peek() != lexer.EOF {
-		tok := p.advance() // Avança consumindo o token atual!
-		if tok.Type == lexer.LPAREN {
-			depth++
-		} else if tok.Type == lexer.RPAREN {
-			depth--
+		case next == lexer.INC || next == lexer.DEC: // x++  →  x = x + 1
+			id := p.advance()
+			op := p.advance()
+			opStr := "+"
+			if op.Type == lexer.DEC {
+				opStr = "-"
+			}
+			return &ast.AssignNode{
+				Name: id.Lexeme,
+				Expr: &ast.BinaryOpNode{OpStr: opStr,
+					Left:  &ast.VariableNode{Name: id.Lexeme, Line: id.Line},
+					Right: &ast.LiteralNode{Value: "1", Line: id.Line},
+					Line:  id.Line},
+				Line: id.Line,
+			}
 		}
 	}
-	// Não chamamos p.match(lexer.RPAREN) porque o advance() já o engoliu.
-	p.match(lexer.SEMICOLON)
-	return &ast.VariableNode{Name: id.Lexeme + "(...)", Line: id.Line}
+	return p.parseExpr()
 }
 
 // ─── PrintStmt ─────────────────────────────────────────────────────
 
 func (p *Parser) parsePrintStmt() ast.ASTNode {
-	p.advance()           // consome 'fmt'
+	start := p.advance()  // consome 'fmt'
 	p.match(lexer.PERIOD) // consome '.'
-	p.match(lexer.IDENT)  // consome 'Println'
-	p.match(lexer.LPAREN)
-	expr := p.parseExpr()
-	p.match(lexer.RPAREN)
-	p.match(lexer.SEMICOLON)
-	return &ast.PrintCallNode{Expr: expr}
+	fn, err := p.match(lexer.IDENT)
+	if err != nil {
+		p.syncError("nome de funcao do pacote fmt esperado")
+		return nil
+	}
+	switch fn.Lexeme {
+	case "Println", "Print", "Printf":
+	default:
+		p.syncError(fmt.Sprintf("fmt.%s nao suportado (use Println, Print ou Printf)", fn.Lexeme))
+		return nil
+	}
+	if _, err := p.match(lexer.LPAREN); err != nil {
+		p.syncError("'(' esperado")
+		return nil
+	}
+	args := p.parseArgs()
+	if _, err := p.match(lexer.RPAREN); err != nil {
+		p.syncError("')' esperado")
+		return nil
+	}
+	p.endStatement()
+	return &ast.PrintCallNode{Func: fn.Lexeme, Args: args, Line: start.Line}
+}
+
+// parseArgs lê uma lista de expressões separadas por vírgula (pode ser vazia).
+func (p *Parser) parseArgs() []ast.ASTNode {
+	var args []ast.ASTNode
+	if p.peek() == lexer.RPAREN {
+		return args
+	}
+	args = append(args, p.parseExpr())
+	for p.peek() == lexer.COMMA {
+		p.advance()
+		args = append(args, p.parseExpr())
+	}
+	return args
 }
 
 // ─── IfStmt ────────────────────────────────────────────────────────
 
 func (p *Parser) parseIf() ast.ASTNode {
-	p.advance() // consome 'if'
+	ifTok := p.advance() // consome 'if'
 
 	var init ast.ASTNode
 	var cond ast.ASTNode
@@ -408,14 +503,17 @@ func (p *Parser) parseIf() ast.ASTNode {
 	if p.peek() == lexer.SEMICOLON {
 		p.advance() // consome o ';'
 		init = firstPt
-		// Go permite que a condição seja lida diretamente após o ';' (sem inicialização)
 		cond = p.parseExpr()
 	} else {
 		// Se não houver ';', a condição é lida diretamente após o 'if'
 		cond = firstPt
+		if isAssignLike(cond) {
+			p.errorf("atribuicao usada como condicao do if")
+		}
 	}
 
 	if _, err := p.match(lexer.LBRACE); err != nil {
+		p.syncError("'{' esperado apos a condicao do if")
 		return nil
 	}
 	thenBranch := p.parseBlock()
@@ -426,156 +524,135 @@ func (p *Parser) parseIf() ast.ASTNode {
 		p.advance() // consome 'else'
 		if p.peek() == lexer.IF {
 			// else if
-			elseBranch = append(elseBranch, p.parseIf())
-		} else {
-			// else
-			if _, err := p.match(lexer.LBRACE); err != nil {
-				return nil
+			if nested := p.parseIf(); nested != nil {
+				elseBranch = append(elseBranch, nested)
 			}
-			elseBranch = p.parseBlock()
-			p.match(lexer.RBRACE)
+			return &ast.IfNode{Init: init, Condition: cond, ThenBranch: thenBranch, ElseBranch: elseBranch, Line: ifTok.Line}
 		}
+		if _, err := p.match(lexer.LBRACE); err != nil {
+			p.syncError("'{' esperado apos 'else'")
+			return nil
+		}
+		elseBranch = p.parseBlock()
+		p.match(lexer.RBRACE)
 	}
+	p.endStatement()
 
-	// Retorna o nó montado
-	return &ast.IfNode{Init: init, Condition: cond, ThenBranch: thenBranch, ElseBranch: elseBranch}
+	return &ast.IfNode{Init: init, Condition: cond, ThenBranch: thenBranch, ElseBranch: elseBranch, Line: ifTok.Line}
 }
 
 // ─── ForStmt ───────────────────────────────────────────────────────
 
 func (p *Parser) parseFor() ast.ASTNode {
-	p.advance() // consome 'for'
+	forTok := p.advance() // consome 'for'
+	node := &ast.ForNode{Line: forTok.Line}
 
-	if p.peek() == lexer.LBRACE {
-		p.advance()
-		body := p.parseBlock()
-		p.match(lexer.RBRACE)
-		return &ast.ForNode{Condition: nil, Body: body}
-	}
-
-	isClassic := false
-	for i := p.pos; i < len(p.tokens); i++ {
-		tt := p.tokens[i].Type
-		if tt == lexer.LBRACE || tt == lexer.EOF {
-			break
+	if p.peek() != lexer.LBRACE {
+		// Diferencia "for cond {" de "for init; cond; post {" procurando
+		// um ';' antes do '{' do corpo.
+		isClassic := false
+		for i := p.pos; i < len(p.tokens); i++ {
+			tt := p.tokens[i].Type
+			if tt == lexer.LBRACE || tt == lexer.EOF {
+				break
+			}
+			if tt == lexer.SEMICOLON {
+				isClassic = true
+				break
+			}
 		}
-		if tt == lexer.SEMICOLON {
-			isClassic = true
-			break
-		}
-	}
 
-	node := &ast.ForNode{}
-
-	if isClassic {
-		init := p.parseSimpleStmt()
-		node.Body = append([]ast.ASTNode{}, init)
-		p.match(lexer.SEMICOLON)
-		if p.peek() != lexer.SEMICOLON {
+		if isClassic {
+			if p.peek() != lexer.SEMICOLON {
+				node.Init = p.parseSimpleStmt()
+			}
+			p.match(lexer.SEMICOLON)
+			if p.peek() != lexer.SEMICOLON {
+				node.Condition = p.parseExpr()
+			}
+			p.match(lexer.SEMICOLON)
+			if p.peek() != lexer.LBRACE {
+				node.Post = p.parseSimpleStmt()
+			}
+		} else {
 			node.Condition = p.parseExpr()
 		}
-		p.match(lexer.SEMICOLON)
-		var post ast.ASTNode
-		if p.peek() != lexer.LBRACE {
-			post = p.parseSimpleStmt()
-		}
-		p.match(lexer.LBRACE)
-		body := p.parseBlock()
-		p.match(lexer.RBRACE)
-
-		full := []ast.ASTNode{init}
-		full = append(full, body...)
-		if post != nil {
-			full = append(full, post)
-		}
-		node.Body = full
-	} else {
-		node.Condition = p.parseExpr()
-		p.match(lexer.LBRACE)
-		node.Body = p.parseBlock()
-		p.match(lexer.RBRACE)
 	}
+
+	if _, err := p.match(lexer.LBRACE); err != nil {
+		p.syncError("'{' esperado no corpo do for")
+		return nil
+	}
+	node.Body = p.parseBlock()
+	p.match(lexer.RBRACE)
+	p.endStatement()
 
 	return node
 }
 
-func (p *Parser) parseSimpleStmt() ast.ASTNode {
-	if p.peek() == lexer.IDENT {
-		if p.lookahead(1) == lexer.DEFINE {
-			id := p.advance()
-			p.advance()
-			expr := p.parseExpr()
-			return &ast.VarDeclNode{Name: id.Lexeme, Initializer: expr, Line: id.Line}
-		}
-		if p.lookahead(1) == lexer.ASSIGN {
-			id := p.advance()
-			p.advance()
-			expr := p.parseExpr()
-			return &ast.AssignNode{Name: id.Lexeme, Expr: expr, Line: id.Line}
-		}
-		if p.lookahead(1) == lexer.INC || p.lookahead(1) == lexer.DEC {
-			id := p.advance()
-			op := p.advance()
-			opStr := "+"
-			if op.Type == lexer.DEC {
-				opStr = "-"
-			}
-			return &ast.AssignNode{
-				Name: id.Lexeme,
-				Expr: &ast.BinaryOpNode{OpStr: opStr,
-					Left:  &ast.VariableNode{Name: id.Lexeme},
-					Right: &ast.LiteralNode{Value: "1"}},
-			}
-		}
-	}
-	return p.parseExpr()
-}
+// ─── ReturnStmt ────────────────────────────────────────────────────
 
 func (p *Parser) parseReturn() ast.ASTNode {
-	p.advance()
+	tok := p.advance()
 
 	if p.peek() == lexer.SEMICOLON || p.peek() == lexer.RBRACE || p.peek() == lexer.EOF {
-		p.match(lexer.SEMICOLON)
-		return &ast.ReturnNode{Value: nil}
+		p.endStatement()
+		return &ast.ReturnNode{Line: tok.Line}
 	}
 
 	val := p.parseExpr()
-	p.match(lexer.SEMICOLON)
-	return &ast.ReturnNode{Value: val}
+	p.endStatement()
+	return &ast.ReturnNode{Value: val, Line: tok.Line}
 }
 
 // =====================================================================
-// CASCATA DE PRECEDÊNCIA CORRIGIDA (LOGICAL -> RELATIONAL -> MATH)
+// CASCATA DE PRECEDÊNCIA (LOGICAL -> RELATIONAL -> MATH)
 // =====================================================================
 
-// Camada 1: Operadores Lógicos (&&, ||)
+// Camada 1: Operadores Lógicos. Como em Go, && tem precedência maior
+// que ||: a || b && c  ≡  a || (b && c).
 func (p *Parser) parseExpr() ast.ASTNode {
-	return p.parseLogicalExpr()
+	return p.parseOrExpr()
 }
 
-func (p *Parser) parseLogicalExpr() ast.ASTNode {
+func (p *Parser) parseOrExpr() ast.ASTNode {
+	left := p.parseAndExpr()
+	for p.peek() == lexer.LOR {
+		op := p.advance()
+		right := p.parseAndExpr()
+		left = &ast.BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right, Line: op.Line}
+	}
+	return left
+}
+
+func (p *Parser) parseAndExpr() ast.ASTNode {
 	left := p.parseRelationalExpr()
-	// Agora ele reconhece && e ||
-	for p.peek() == lexer.LAND || p.peek() == lexer.LOR {
+	for p.peek() == lexer.LAND {
 		op := p.advance()
 		right := p.parseRelationalExpr()
-		left = &ast.BinaryOpNode{OpStr: op.Lexeme,
-			Left:  left,
-			Right: right}
+		left = &ast.BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right, Line: op.Line}
 	}
 	return left
 }
 
 // Camada 2: Operadores Relacionais (==, !=, <, >, <=, >=)
+// Associam à esquerda, como em Go: 1 < 2 == true  ≡  (1 < 2) == true.
 func (p *Parser) parseRelationalExpr() ast.ASTNode {
 	left := p.parseSimpleExpr()
-	switch p.peek() {
-	case lexer.EQL, lexer.NEQ, lexer.LSS, lexer.GTR, lexer.LEQ, lexer.GEQ:
+	for isRelational(p.peek()) {
 		op := p.advance()
 		right := p.parseSimpleExpr()
-		return &ast.BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right}
+		left = &ast.BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right, Line: op.Line}
 	}
 	return left
+}
+
+func isRelational(t lexer.Token) bool {
+	switch t {
+	case lexer.EQL, lexer.NEQ, lexer.LSS, lexer.GTR, lexer.LEQ, lexer.GEQ:
+		return true
+	}
+	return false
 }
 
 // Camada 3: Soma e Subtração
@@ -584,7 +661,7 @@ func (p *Parser) parseSimpleExpr() ast.ASTNode {
 	for p.peek() == lexer.ADD || p.peek() == lexer.SUB {
 		op := p.advance()
 		right := p.parseTerm()
-		left = &ast.BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right}
+		left = &ast.BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right, Line: op.Line}
 	}
 	return left
 }
@@ -595,7 +672,7 @@ func (p *Parser) parseTerm() ast.ASTNode {
 	for p.peek() == lexer.MUL || p.peek() == lexer.QUO || p.peek() == lexer.REM {
 		op := p.advance()
 		right := p.parseUnary()
-		left = &ast.BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right}
+		left = &ast.BinaryOpNode{OpStr: op.Lexeme, Left: left, Right: right, Line: op.Line}
 	}
 	return left
 }
@@ -603,43 +680,32 @@ func (p *Parser) parseTerm() ast.ASTNode {
 // Camada 5: Unários (Negação Lógica e Numérica)
 func (p *Parser) parseUnary() ast.ASTNode {
 	switch p.peek() {
-	case lexer.NOT: // O operador '!' agora cai perfeitamente aqui
+	case lexer.NOT, lexer.SUB:
 		op := p.advance()
-		return &ast.UnaryOpNode{OpStr: op.Lexeme, Operand: p.parseUnary()}
-	case lexer.SUB:
-		op := p.advance()
-		return &ast.UnaryOpNode{OpStr: op.Lexeme, Operand: p.parseUnary()}
+		return &ast.UnaryOpNode{OpStr: op.Lexeme, Operand: p.parseUnary(), Line: op.Line}
 	}
 	return p.parseFactor()
 }
 
-// Camada 6: Literais, Variáveis e Parênteses
+// Camada 6: Literais, Variáveis, Chamadas e Parênteses
 func (p *Parser) parseFactor() ast.ASTNode {
 	tok := p.peekToken()
 
 	switch p.peek() {
 	case lexer.INT, lexer.FLOAT, lexer.STRING, lexer.IMAG, lexer.CHAR:
 		p.advance()
-		return &ast.LiteralNode{Value: tok.Lexeme}
+		return &ast.LiteralNode{Value: tok.Lexeme, Line: tok.Line}
 
 	case lexer.IDENT:
-		if tok.Lexeme == "true" || tok.Lexeme == "false" {
-			p.advance()
-			return &ast.LiteralNode{Value: tok.Lexeme}
-		}
 		p.advance()
+		if tok.Lexeme == "true" || tok.Lexeme == "false" {
+			return &ast.LiteralNode{Value: tok.Lexeme, Line: tok.Line}
+		}
 		if p.peek() == lexer.LPAREN {
 			p.advance()
-			depth := 1
-			for depth > 0 && p.peek() != lexer.EOF {
-				tokInterno := p.advance()
-				if tokInterno.Type == lexer.LPAREN {
-					depth++
-				} else if tokInterno.Type == lexer.RPAREN {
-					depth--
-				}
-			}
-			return &ast.VariableNode{Name: tok.Lexeme + "(...)", Line: tok.Line}
+			args := p.parseArgs()
+			p.match(lexer.RPAREN)
+			return &ast.CallNode{Name: tok.Lexeme, Args: args, Line: tok.Line}
 		}
 		return &ast.VariableNode{Name: tok.Lexeme, Line: tok.Line}
 
@@ -651,6 +717,6 @@ func (p *Parser) parseFactor() ast.ASTNode {
 
 	default:
 		p.syncError(fmt.Sprintf("fator invalido: %q", tok.Lexeme))
-		return &ast.LiteralNode{Value: "0"}
+		return &ast.LiteralNode{Value: "0", Line: tok.Line}
 	}
 }

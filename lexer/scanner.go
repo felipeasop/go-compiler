@@ -10,6 +10,7 @@ type Scanner struct {
 	pos      int
 	line     int
 	lastType Token
+	errors   []error // erros não fatais acumulados durante o escaneamento
 }
 
 func NewScanner(source string) *Scanner {
@@ -55,6 +56,7 @@ func (s *Scanner) skipLineComment() {
 }
 
 func (s *Scanner) skipBlockComment() error {
+	start := s.line
 	for s.peek() != 0 {
 		c := s.next()
 		if c == '\n' {
@@ -65,7 +67,7 @@ func (s *Scanner) skipBlockComment() error {
 			return nil
 		}
 	}
-	return fmt.Errorf("comentario de bloco nao fechado na linha %d", s.line)
+	return fmt.Errorf("erro lexico linha %d: comentario de bloco nao fechado", start)
 }
 
 // tokenRequiresSemicolon implementa a regra de inserção automática de ';' do Go.
@@ -154,17 +156,18 @@ func (s *Scanner) NextToken() (TokenData, error) {
 				case 'n', 't', 'r', '\\', '"', '\'':
 					buf = append(buf, s.next())
 				default:
-					return TokenData{}, fmt.Errorf("escape invalido '\\%c' linha %d", escaped, startLine)
+					s.errors = append(s.errors, fmt.Errorf("erro lexico linha %d: sequencia de escape invalida '\\%c'", startLine, escaped))
+					buf = append(buf, s.next())
 				}
 				continue
 			}
 			if s.peek() == '\n' {
-				return TokenData{}, fmt.Errorf("string nao fechada linha %d", startLine)
+				return TokenData{}, fmt.Errorf("erro lexico linha %d: string nao fechada", startLine)
 			}
 			buf = append(buf, s.next())
 		}
 		if s.peek() == 0 {
-			return TokenData{}, fmt.Errorf("string nao fechada linha %d", startLine)
+			return TokenData{}, fmt.Errorf("erro lexico linha %d: string nao fechada", startLine)
 		}
 		buf = append(buf, s.next()) // consome '"' de fechamento
 		return s.emit(STRING, string(buf), startLine)
@@ -180,7 +183,7 @@ func (s *Scanner) NextToken() (TokenData, error) {
 			buf = append(buf, s.next())
 		}
 		if s.peek() == 0 {
-			return TokenData{}, fmt.Errorf("raw string nao fechada linha %d", startLine)
+			return TokenData{}, fmt.Errorf("erro lexico linha %d: raw string nao fechada", startLine)
 		}
 		buf = append(buf, s.next()) // consome '`' de fechamento
 		return s.emit(STRING, string(buf), startLine)
@@ -195,7 +198,7 @@ func (s *Scanner) NextToken() (TokenData, error) {
 			buf = append(buf, s.next())
 		}
 		if s.peek() == 0 {
-			return TokenData{}, fmt.Errorf("char literal nao fechado linha %d", startLine)
+			return TokenData{}, fmt.Errorf("erro lexico linha %d: literal de caractere nao fechado", startLine)
 		}
 		buf = append(buf, s.next())
 		return s.emit(CHAR, string(buf), startLine)
@@ -372,7 +375,7 @@ func (s *Scanner) NextToken() (TokenData, error) {
 		return s.emit(COMMA, ",", startLine)
 	}
 
-	return TokenData{}, fmt.Errorf("caractere invalido '%c' linha %d", c, startLine)
+	return TokenData{}, fmt.Errorf("erro lexico linha %d: caractere invalido '%c'", startLine, c)
 }
 
 // emit atualiza lastType e retorna o TokenData — ponto único de saída.
@@ -381,17 +384,25 @@ func (s *Scanner) emit(t Token, lex string, line int) (TokenData, error) {
 	return TokenData{t, lex, line}, nil
 }
 
-func (s *Scanner) Tokenize() ([]TokenData, error) {
+// Tokenize percorre todo o código-fonte. Erros léxicos não interrompem
+// o escaneamento: o caractere/lexema inválido é descartado e a análise
+// continua, para que todos os erros sejam reportados de uma só vez.
+func (s *Scanner) Tokenize() ([]TokenData, []error) {
 	var tokens []TokenData
 	for {
+		before := s.pos
 		tok, err := s.NextToken()
 		if err != nil {
-			return nil, err
+			s.errors = append(s.errors, err)
+			if s.pos == before { // garante progresso
+				s.next()
+			}
+			continue
 		}
 		tokens = append(tokens, tok)
 		if tok.Type == EOF {
 			break
 		}
 	}
-	return tokens, nil
+	return tokens, s.errors
 }
